@@ -1,7 +1,6 @@
 use crate::types::{AgentContainer, AgentStatus};
 use crate::api;
 use yew::prelude::*;
-use yew::suspension::{Suspension, SuspensionResult};
 
 #[function_component(Dashboard)]
 pub fn dashboard() -> Html {
@@ -30,9 +29,9 @@ pub fn dashboard() -> Html {
                         <p>{"No agents yet. Create one to get started!"}</p>
                     </div>
                 } else {
-                    for agents.iter().map(|agent| {
+                    {for agents.iter().map(|agent| {
                         html! { <AgentCard agent={agent.clone()} /> }
-                    })
+                    })}
                 }
             </div>
         </div>
