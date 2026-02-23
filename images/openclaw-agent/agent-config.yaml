@@ -1,0 +1,22 @@
+# OpenClaw Agent Configuration
+# Override via environment variables
+
+agent:
+  name: ${AGENT_NAME:-claw-agent}
+  
+llm:
+  provider: ${LLM_PROVIDER:-openai}
+  model: ${LLM_MODEL:-gpt-4o}
+  
+# API keys injected at runtime
+# OPENAI_API_KEY, ANTHROPIC_API_KEY, etc.
+
+server:
+  port: 3000
+  host: 0.0.0.0
+
+workspace:
+  path: /workspace
+  
+logging:
+  level: info
