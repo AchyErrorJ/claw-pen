@@ -6,10 +6,9 @@ use anyhow::Result;
 use bollard::Docker;
 use bollard::container::{
     Config, CreateContainerOptions, StartContainerOptions, StopContainerOptions,
-    ListContainersOptions, InspectContainerOptions,
+    ListContainersOptions,
 };
 use bollard::image::CreateImageOptions;
-use bollard::models::ContainerStateStatusEnum;
 use futures_util::StreamExt;
 
 use crate::types::{AgentContainer, AgentConfig, AgentStatus, ResourceUsage, LlmProvider};
@@ -32,11 +31,11 @@ impl RuntimeClient {
     pub async fn list_containers(&self) -> Result<Vec<AgentContainer>> {
         let options = ListContainersOptions::<String> {
             all: true,
-            filters: Some({
+            filters: {
                 let mut filters = std::collections::HashMap::new();
                 filters.insert("label".to_string(), vec!["claw-pen.agent".to_string()]);
                 filters
-            }),
+            },
             ..Default::default()
         };
 
@@ -110,9 +109,25 @@ impl RuntimeClient {
         let mut env = env_vars;
         env.extend(llm_env);
 
+        // Prepare label values (must live long enough for borrowing)
+        let provider_str = format!("{:?}", config.llm_provider).to_lowercase();
+        let memory_str = config.memory_mb.to_string();
+        let cores_str = config.cpu_cores.to_string();
+        let name_str = name.to_string();
+        
+        let mut labels = std::collections::HashMap::new();
+        labels.insert("claw-pen.agent", "true");
+        labels.insert("claw-pen.name", &name_str);
+        labels.insert("claw-pen.llm_provider", &provider_str);
+        if let Some(ref model) = config.llm_model {
+            labels.insert("claw-pen.llm_model", model.as_str());
+        }
+        labels.insert("claw-pen.memory_mb", &memory_str);
+        labels.insert("claw-pen.cpu_cores", &cores_str);
+
         let container_config = Config {
             image: Some(image),
-            env: Some(env),
+            env: Some(env.iter().map(|s| s.as_str()).collect()),
             host_config: Some(bollard::service::HostConfig {
                 memory: Some((config.memory_mb as i64) * 1024 * 1024), // Convert MB to bytes
                 cpu_period: Some(100000),
@@ -120,18 +135,7 @@ impl RuntimeClient {
                 extra_hosts: Some(vec!["host.docker.internal:host-gateway".to_string()]),
                 ..Default::default()
             }),
-            labels: Some({
-                let mut labels = std::collections::HashMap::new();
-                labels.insert("claw-pen.agent".to_string(), "true".to_string());
-                labels.insert("claw-pen.name".to_string(), name.to_string());
-                labels.insert("claw-pen.llm_provider".to_string(), format!("{:?}", config.llm_provider).to_lowercase());
-                if let Some(ref model) = config.llm_model {
-                    labels.insert("claw-pen.llm_model".to_string(), model.clone());
-                }
-                labels.insert("claw-pen.memory_mb".to_string(), config.memory_mb.to_string());
-                labels.insert("claw-pen.cpu_cores".to_string(), config.cpu_cores.to_string());
-                labels
-            }),
+            labels: Some(labels),
             ..Default::default()
         };
 
@@ -164,7 +168,7 @@ impl RuntimeClient {
         Ok(())
     }
 
-    pub async fn get_stats(&self, id: &str) -> Result<Option<ResourceUsage>> {
+    pub async fn get_stats(&self, _id: &str) -> Result<Option<ResourceUsage>> {
         // TODO: Implement stats collection via Docker stats API
         Ok(None)
     }

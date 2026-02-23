@@ -73,7 +73,7 @@ pub struct UpdateAgentRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PartialAgentConfig {
-    pub llm_provider: Option<String>,
+    pub llm_provider: Option<LlmProvider>,
     pub llm_model: Option<String>,
     pub memory_mb: Option<u32>,
     pub cpu_cores: Option<f32>,
