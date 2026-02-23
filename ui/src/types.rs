@@ -9,7 +9,7 @@ pub enum AgentStatus {
     Error,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AgentContainer {
     pub id: String,
     pub name: String,
@@ -19,7 +19,7 @@ pub struct AgentContainer {
     pub resource_usage: Option<ResourceUsage>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AgentConfig {
     pub llm_provider: LlmProvider,
     pub llm_model: Option<String>,
@@ -60,7 +60,7 @@ impl LlmProvider {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ResourceUsage {
     pub memory_mb: f32,
     pub cpu_percent: f32,
