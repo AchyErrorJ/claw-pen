@@ -36,8 +36,19 @@ claw-pen create --name my-agent --provider openai --model gpt-4o
 | `coding-assistant` | OpenAI | General coding |
 | `code-reviewer` | Anthropic | PR reviews |
 | `local-assistant` | Ollama | Private, local |
+| `lm-studio` | LM Studio | Local, easy GUI |
 | `researcher` | OpenAI | Web research |
 | `devops` | OpenAI | Infrastructure |
+
+Override any template at creation:
+
+```bash
+# Use researcher template with a different model
+claw-pen create --template researcher --model gpt-4o-mini
+
+# Switch to local
+claw-pen create --template coding-assistant --provider ollama --model llama3.2
+```
 
 ## Deployment Modes
 
