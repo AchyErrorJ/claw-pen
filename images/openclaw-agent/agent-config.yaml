@@ -1,22 +1,22 @@
-# OpenClaw Agent Configuration
+# OpenClaw Agent Configuration for Containers
 # Override via environment variables
 
 agent:
   name: ${AGENT_NAME:-claw-agent}
-  
+
 llm:
   provider: ${LLM_PROVIDER:-openai}
   model: ${LLM_MODEL:-gpt-4o}
-  
-# API keys injected at runtime
+
+# API keys injected at runtime via environment
 # OPENAI_API_KEY, ANTHROPIC_API_KEY, etc.
 
-server:
-  port: 3000
-  host: 0.0.0.0
+# For local LLMs, configure endpoint
+# OLLAMA_HOST=http://host.docker.internal:11434
+# LMSTUDIO_HOST=http://host.docker.internal:1234
 
 workspace:
   path: /workspace
-  
+
 logging:
-  level: info
+  level: ${LOG_LEVEL:-info}
