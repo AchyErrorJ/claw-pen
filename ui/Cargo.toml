@@ -15,5 +15,3 @@ gloo-net = { version = "0.5", features = ["http"] }
 web-sys = { version = "0.3", features = ["console"] }
 wasm-logger = "0.2"
 
-[profile.release]
-opt-level = "s"
