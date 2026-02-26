@@ -1,0 +1,56 @@
+[agent]
+name = "lead-hunter"
+org = "andor-design"
+version = "1.0.0"
+
+[search]
+# Northern Ontario cities for And or Design
+locations = ["Sudbury", "North Bay", "Timmins", "Sault Ste Marie"]
+# Keywords to find people looking for permit/design services
+keywords = [
+    "permit drawings",
+    "BCIN",
+    "building permit",
+    "architectural drawings",
+    "draftsman",
+    "need contractor",
+    "looking for architect",
+    "deck permit",
+    "garage plans",
+    "basement apartment",
+]
+max_results_per_query = 20
+
+[notifications]
+whatsapp = true
+channel = "webchat"
+recipient = "Jer"
+
+[schedule]
+# Weekly on Monday at 9 AM EST
+cron = "0 9 * * 1"
+
+[storage]
+# Shared memory namespace for deduplication
+namespace = "andor-design"
+lead_type = "lead"
+# Days to keep seen leads in memory for dedup
+dedup_retention_days = 30
+
+[logging]
+level = "INFO"
+file = "lead-hunter.log"
+
+[rss]
+# RSS feed URLs for lead sources (e.g., Google Alerts)
+# Add feed URLs here after setting up Google Alerts
+feeds = [
+    # Google Alerts will provide these URLs once created
+    # Format: "https://www.google.com/alerts/feeds/USER_ID/ALERT_ID"
+    # Example:
+    # "https://www.google.com/alerts/feeds/1234567890abcdef/1234567890123",
+]
+# Maximum entries to fetch per feed
+max_entries_per_feed = 50
+# Keywords for filtering (inherits from [search].keywords if not specified)
+# keywords = ["permit", "BCIN", "architect", "renovation"]

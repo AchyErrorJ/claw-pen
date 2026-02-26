@@ -13,7 +13,15 @@ pub struct SecretsManager {
 
 impl SecretsManager {
     pub fn new() -> Result<Self> {
-        let base_path = PathBuf::from("/var/lib/claw-pen/secrets");
+        // Use local data directory instead of /var/lib
+        let base_path = std::env::var("CLAW_PEN_DATA_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| {
+                dirs::data_local_dir()
+                    .unwrap_or_else(|| PathBuf::from("."))
+                    .join("claw-pen")
+            })
+            .join("secrets");
         std::fs::create_dir_all(&base_path)?;
 
         Ok(Self { base_path })
