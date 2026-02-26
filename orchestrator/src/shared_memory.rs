@@ -688,35 +688,46 @@ impl SharedMemory {
 
         let (query, params): (String, Vec<Box<dyn rusqlite::ToSql>>) = match (org, agent_id) {
             (Some(o), Some(a)) if o != ORG_ALL => (
-                "SELECT id, org, agent_id, content, embedding, metadata, created_at, updated_at 
+                "SELECT id, org, agent_id, content, embedding, metadata, created_at, updated_at
                  FROM memories WHERE org = ?1 AND agent_id = ?2 ORDER BY created_at DESC"
                     .to_string(),
                 vec![Box::new(o.to_string()), Box::new(a.to_string())],
             ),
             (Some(o), None) if o != ORG_ALL => (
-                "SELECT id, org, agent_id, content, embedding, metadata, created_at, updated_at 
+                "SELECT id, org, agent_id, content, embedding, metadata, created_at, updated_at
                  FROM memories WHERE org = ?1 ORDER BY created_at DESC"
                     .to_string(),
                 vec![Box::new(o.to_string())],
             ),
+            (Some(_), Some(a)) => {
+                // This is ORG_ALL with agent_id filter
+                (
+                    "SELECT id, org, agent_id, content, embedding, metadata, created_at, updated_at
+                     FROM memories WHERE agent_id = ?1 ORDER BY created_at DESC"
+                        .to_string(),
+                    vec![Box::new(a.to_string())],
+                )
+            }
+            (Some(_), None) => {
+                // This is ORG_ALL without agent_id filter
+                (
+                    "SELECT id, org, agent_id, content, embedding, metadata, created_at, updated_at
+                     FROM memories ORDER BY created_at DESC"
+                        .to_string(),
+                    vec![],
+                )
+            }
             (None, Some(a)) => (
-                "SELECT id, org, agent_id, content, embedding, metadata, created_at, updated_at 
+                "SELECT id, org, agent_id, content, embedding, metadata, created_at, updated_at
                  FROM memories WHERE agent_id = ?1 ORDER BY created_at DESC"
                     .to_string(),
                 vec![Box::new(a.to_string())],
             ),
-            (None, None) | (Some(ORG_ALL), _) => (
-                "SELECT id, org, agent_id, content, embedding, metadata, created_at, updated_at 
+            (None, None) => (
+                "SELECT id, org, agent_id, content, embedding, metadata, created_at, updated_at
                  FROM memories ORDER BY created_at DESC"
                     .to_string(),
                 vec![],
-            ),
-            (Some(_), Some(a)) => (
-                // This is ORG_ALL with agent_id filter
-                "SELECT id, org, agent_id, content, embedding, metadata, created_at, updated_at 
-                 FROM memories WHERE agent_id = ?1 ORDER BY created_at DESC"
-                    .to_string(),
-                vec![Box::new(a.to_string())],
             ),
         };
 

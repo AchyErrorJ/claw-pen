@@ -42,7 +42,7 @@ bollard = "0.16"
 sysinfo = "0.30"
 
 # Shared memory / SQLite
-rusqlite = { version = "0.31", features = ["bundled"] }
+rusqlite = "0.31"
 
 [dev-dependencies]
 tempfile = "3"
