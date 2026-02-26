@@ -1,0 +1,1227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Claw Pen - Agent Management</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg-primary: #0f0f1a;
+            --bg-secondary: #1a1a2e;
+            --bg-tertiary: #16213e;
+            --accent: #e94560;
+            --accent-hover: #ff6b6b;
+            --success: #22c55e;
+            --warning: #fbbf24;
+            --danger: #ef4444;
+            --text-primary: #f0f0f0;
+            --text-secondary: #94a3b8;
+            --border: #0f3460;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+
+        /* Navigation */
+        .nav {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border);
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .nav-logo {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: var(--accent);
+        }
+
+        .nav-items {
+            display: flex;
+            gap: 1rem;
+        }
+
+        .nav-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            padding: 0.5rem 1rem;
+            cursor: pointer;
+            border-radius: 6px;
+            transition: all 0.2s;
+        }
+
+        .nav-btn:hover, .nav-btn.active {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+
+        /* Main Container */
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        /* Status Bar */
+        .status-bar {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 2rem;
+            flex-wrap: wrap;
+        }
+
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            font-size: 0.9rem;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--danger);
+        }
+
+        .status-dot.online { background: var(--success); }
+
+        /* Views */
+        .view { display: none; }
+        .view.active { display: block; }
+
+        /* Setup Wizard */
+        .wizard {
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        .wizard-step {
+            display: none;
+        }
+
+        .wizard-step.active {
+            display: block;
+        }
+
+        .wizard-title {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .wizard-subtitle {
+            color: var(--text-secondary);
+            margin-bottom: 2rem;
+        }
+
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        .form-group input,
+        .form-group select {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            font-size: 1rem;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+
+        .form-group .hint {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-top: 0.25rem;
+        }
+
+        .wizard-actions {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 2rem;
+        }
+
+        /* Dashboard */
+        .dashboard-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+        }
+
+        .dashboard-title h2 {
+            font-size: 1.8rem;
+        }
+
+        .dashboard-title p {
+            color: var(--text-secondary);
+        }
+
+        .agents-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .agent-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.5rem;
+            transition: border-color 0.2s;
+        }
+
+        .agent-card:hover {
+            border-color: var(--accent);
+        }
+
+        .agent-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            margin-bottom: 1rem;
+        }
+
+        .agent-name {
+            font-size: 1.3rem;
+            font-weight: 600;
+        }
+
+        .agent-id {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+
+        .agent-status {
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 500;
+        }
+
+        .status-running { background: rgba(34, 197, 94, 0.2); color: var(--success); }
+        .status-stopped { background: rgba(148, 163, 184, 0.2); color: var(--text-secondary); }
+        .status-starting, .status-stopping { background: rgba(251, 191, 36, 0.2); color: var(--warning); }
+        .status-error { background: rgba(239, 68, 68, 0.2); color: var(--danger); }
+
+        .agent-config {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .config-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.5rem;
+            background: var(--bg-tertiary);
+            border-radius: 6px;
+            font-size: 0.9rem;
+        }
+
+        .config-label { color: var(--text-secondary); }
+        .config-value { font-weight: 500; }
+        .config-value.local { color: var(--success); }
+
+        .agent-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .btn {
+            flex: 1;
+            padding: 0.75rem;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.95rem;
+            font-weight: 500;
+            transition: opacity 0.2s;
+        }
+
+        .btn:hover { opacity: 0.9; }
+
+        .btn-primary { background: var(--accent); color: white; }
+        .btn-secondary { background: #3b82f6; color: white; }
+        .btn-success { background: var(--success); color: white; }
+        .btn-danger { background: var(--danger); color: white; }
+        .btn-ghost { background: transparent; color: var(--text-secondary); border: 1px solid var(--border); }
+
+        .empty-state {
+            grid-column: 1 / -1;
+            text-align: center;
+            padding: 4rem 2rem;
+            color: var(--text-secondary);
+        }
+
+        .empty-state-icon {
+            font-size: 4rem;
+            margin-bottom: 1rem;
+        }
+
+        /* Create Agent Modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .modal {
+            background: var(--bg-secondary);
+            border-radius: 16px;
+            padding: 2rem;
+            width: 90%;
+            max-width: 600px;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+        }
+
+        .modal-title { font-size: 1.5rem; }
+
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            color: var(--text-secondary);
+            cursor: pointer;
+        }
+
+        /* Form Grid */
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+
+        /* Slider */
+        .slider-container {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .slider {
+            flex: 1;
+            -webkit-appearance: none;
+            height: 8px;
+            border-radius: 4px;
+            background: var(--bg-tertiary);
+        }
+
+        .slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: var(--accent);
+            cursor: pointer;
+        }
+
+        .slider-value {
+            min-width: 60px;
+            text-align: center;
+            padding: 0.5rem;
+            background: var(--bg-tertiary);
+            border-radius: 6px;
+        }
+
+        /* Environment Variables */
+        .env-vars-list {
+            margin-bottom: 1rem;
+        }
+
+        .env-var-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr auto;
+            gap: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .btn-icon {
+            width: 40px;
+            padding: 0;
+            background: var(--danger);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+
+        .btn-add {
+            width: 100%;
+            padding: 0.5rem;
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+            border: 1px dashed var(--border);
+            border-radius: 8px;
+            cursor: pointer;
+        }
+
+        /* API Key Input */
+        .api-key-group {
+            position: relative;
+        }
+
+        .api-key-group input {
+            padding-right: 3rem;
+        }
+
+        .api-key-toggle {
+            position: absolute;
+            right: 0.5rem;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 0.8rem;
+        }
+
+        /* Provider Icons */
+        .provider-icon {
+            width: 24px;
+            height: 24px;
+            margin-right: 0.5rem;
+        }
+
+        /* Settings Panel */
+        .settings-section {
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .settings-title {
+            font-size: 1.2rem;
+            margin-bottom: 1rem;
+        }
+
+        .settings-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1rem 0;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .settings-row:last-child {
+            border-bottom: none;
+        }
+
+        /* Toast Notifications */
+        .toast-container {
+            position: fixed;
+            bottom: 2rem;
+            right: 2rem;
+            z-index: 2000;
+        }
+
+        .toast {
+            background: var(--bg-secondary);
+            border-left: 4px solid var(--accent);
+            padding: 1rem 1.5rem;
+            border-radius: 8px;
+            margin-top: 0.5rem;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        .toast.success { border-color: var(--success); }
+        .toast.error { border-color: var(--danger); }
+
+        /* Provider badges */
+        .provider-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.25rem 0.75rem;
+            background: var(--bg-tertiary);
+            border-radius: 20px;
+            font-size: 0.85rem;
+        }
+
+        .provider-badge.local {
+            background: rgba(34, 197, 94, 0.2);
+            color: var(--success);
+        }
+
+        /* Quick Templates */
+        .quick-templates {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1.5rem;
+            flex-wrap: wrap;
+        }
+
+        .template-chip {
+            padding: 0.5rem 1rem;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: all 0.2s;
+        }
+
+        .template-chip:hover {
+            border-color: var(--accent);
+            background: rgba(233, 69, 96, 0.1);
+        }
+
+        .template-chip.selected {
+            background: var(--accent);
+            border-color: var(--accent);
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="nav">
+        <div class="nav-logo">🦀 Claw Pen</div>
+        <div class="nav-items">
+            <button class="nav-btn active" data-view="dashboard" onclick="showView('dashboard')">Dashboard</button>
+            <button class="nav-btn" data-view="agents" onclick="showView('agents')">Agents</button>
+            <button class="nav-btn" data-view="settings" onclick="showView('settings')">Settings</button>
+        </div>
+    </nav>
+
+    <!-- Status Bar -->
+    <div class="container">
+        <div class="status-bar">
+            <div class="status-item">
+                <div class="status-dot" id="orchestrator-status-dot"></div>
+                <span id="orchestrator-status-text">Checking...</span>
+            </div>
+            <div class="status-item">
+                <div class="status-dot" id="docker-status-dot"></div>
+                <span id="docker-status-text">Docker</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Setup Wizard -->
+    <div id="wizard-view" class="view">
+        <div class="container">
+            <div class="wizard">
+                <div class="wizard-step active" id="wizard-step-1">
+                    <h1 class="wizard-title">Welcome to Claw Pen! 🦀</h1>
+                    <p class="wizard-subtitle">Let's get you set up with AI agent management</p>
+
+                    <div class="form-group">
+                        <label>Orchestrator URL</label>
+                        <input type="text" id="setup-orchestrator-url" value="http://localhost:3000" placeholder="http://localhost:3000">
+                        <div class="hint">The Claw Pen orchestrator manages your AI agents</div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Deployment Mode</label>
+                        <select id="setup-deployment-mode">
+                            <option value="windows-wsl">Windows + WSL2 (Docker in WSL)</option>
+                            <option value="linux-native">Linux Native</option>
+                            <option value="all-windows">All Windows</option>
+                        </select>
+                        <div class="hint">Choose how you want to run containers</div>
+                    </div>
+
+                    <div class="wizard-actions">
+                        <div></div>
+                        <button class="btn btn-primary" onclick="wizardNext(2)">Continue →</button>
+                    </div>
+                </div>
+
+                <div class="wizard-step" id="wizard-step-2">
+                    <h1 class="wizard-title">Check Dependencies</h1>
+                    <p class="wizard-subtitle">Verifying your environment</p>
+
+                    <div class="settings-section">
+                        <div class="settings-row">
+                            <span>Docker</span>
+                            <span id="setup-docker-status">Checking...</span>
+                        </div>
+                        <div class="settings-row">
+                            <span>Orchestrator Connection</span>
+                            <span id="setup-orchestrator-status">Checking...</span>
+                        </div>
+                    </div>
+
+                    <div id="setup-issues" style="display: none;" class="settings-section" style="border-color: var(--danger);">
+                        <p style="color: var(--danger); margin-bottom: 1rem;">Please fix the following issues:</p>
+                        <ul id="setup-issues-list" style="padding-left: 1.5rem; color: var(--text-secondary);"></ul>
+                    </div>
+
+                    <div class="wizard-actions">
+                        <button class="btn btn-ghost" onclick="wizardNext(1)">← Back</button>
+                        <button class="btn btn-primary" onclick="wizardFinish()">Finish Setup →</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Dashboard View -->
+    <div id="dashboard-view" class="view active">
+        <div class="container">
+            <div class="dashboard-header">
+                <div class="dashboard-title">
+                    <h2>Dashboard</h2>
+                    <p>Manage your AI agents</p>
+                </div>
+                <button class="btn btn-primary" onclick="showCreateModal()">+ New Agent</button>
+            </div>
+
+            <div class="agents-grid" id="dashboard-agents">
+                <div class="empty-state">
+                    <div class="empty-state-icon">🦀</div>
+                    <h3>No agents yet</h3>
+                    <p>Create your first AI agent to get started</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Agents View -->
+    <div id="agents-view" class="view">
+        <div class="container">
+            <div class="dashboard-header">
+                <div class="dashboard-title">
+                    <h2>Agents</h2>
+                    <p>All your AI agents in one place</p>
+                </div>
+                <div style="display: flex; gap: 0.5rem;">
+                    <button class="btn btn-ghost" onclick="refreshAgents()">Refresh</button>
+                    <button class="btn btn-primary" onclick="showCreateModal()">+ New Agent</button>
+                </div>
+            </div>
+
+            <div class="quick-templates" id="quick-templates">
+                <!-- Template chips will be inserted here -->
+            </div>
+
+            <div class="agents-grid" id="all-agents">
+                <div class="empty-state">Loading agents...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings View -->
+    <div id="settings-view" class="view">
+        <div class="container">
+            <div class="dashboard-title">
+                <h2>Settings</h2>
+                <p>Configure Claw Pen</p>
+            </div>
+
+            <div class="settings-section">
+                <h3 class="settings-title">Connection</h3>
+                <div class="form-group">
+                    <label>Orchestrator URL</label>
+                    <input type="text" id="settings-orchestrator-url" value="http://localhost:3000">
+                </div>
+                <div class="form-group">
+                    <label>Deployment Mode</label>
+                    <select id="settings-deployment-mode">
+                        <option value="windows-wsl">Windows + WSL2</option>
+                        <option value="linux-native">Linux Native</option>
+                        <option value="all-windows">All Windows</option>
+                    </select>
+                </div>
+                <button class="btn btn-primary" onclick="saveSettings()">Save Settings</button>
+            </div>
+
+            <div class="settings-section">
+                <h3 class="settings-title">API Keys</h3>
+                <p style="color: var(--text-secondary); margin-bottom: 1rem;">
+                    API keys are encrypted and stored securely per-agent.
+                    They're never stored in plain text.
+                </p>
+                <div class="settings-row">
+                    <span>OpenAI</span>
+                    <span style="color: var(--text-secondary);">Set per agent</span>
+                </div>
+                <div class="settings-row">
+                    <span>Anthropic</span>
+                    <span style="color: var(--text-secondary);">Set per agent</span>
+                </div>
+                <div class="settings-row">
+                    <span>Gemini</span>
+                    <span style="color: var(--text-secondary);">Set per agent</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Agent Modal -->
+    <div class="modal-overlay" id="create-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title">Create New Agent</h3>
+                <button class="modal-close" onclick="hideCreateModal()">×</button>
+            </div>
+
+            <form id="create-form" onsubmit="createAgent(event)">
+                <div class="form-group">
+                    <label for="agent-name">Agent Name</label>
+                    <input type="text" id="agent-name" required placeholder="my-coding-assistant">
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="agent-provider">Provider</label>
+                        <select id="agent-provider" onchange="updateProviderDefaults()">
+                            <option value="openai">OpenAI</option>
+                            <option value="anthropic">Anthropic</option>
+                            <option value="gemini">Google Gemini</option>
+                            <option value="groq">Groq</option>
+                            <option value="ollama">Ollama (Local)</option>
+                            <option value="lmstudio">LM Studio (Local)</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="agent-model">Model</label>
+                        <input type="text" id="agent-model" placeholder="gpt-4o" value="gpt-4o">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="agent-memory">Memory (MB)</label>
+                        <div class="slider-container">
+                            <input type="range" class="slider" id="agent-memory" min="512" max="16384" value="2048" step="256" oninput="updateMemoryValue()">
+                            <span class="slider-value" id="memory-value">2048 MB</span>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="agent-cpu">CPU Cores</label>
+                        <select id="agent-cpu">
+                            <option value="0.5">0.5 cores</option>
+                            <option value="1.0" selected>1 core</option>
+                            <option value="1.5">1.5 cores</option>
+                            <option value="2.0">2 cores</option>
+                            <option value="4.0">4 cores</option>
+                            <option value="8.0">8 cores</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>API Key</label>
+                    <div class="api-key-group">
+                        <input type="password" id="agent-api-key" placeholder="sk-...">
+                        <button type="button" class="api-key-toggle" onclick="toggleApiKeyVisibility()">Show</button>
+                    </div>
+                    <div class="hint">Encrypted and stored securely. Only needed for cloud providers.</div>
+                </div>
+
+                <div class="form-group">
+                    <label>Environment Variables</label>
+                    <div class="env-vars-list" id="env-vars-list">
+                        <!-- Env vars will be added here -->
+                    </div>
+                    <button type="button" class="btn-add" onclick="addEnvVarRow()">+ Add Environment Variable</button>
+                </div>
+
+                <div class="modal-actions" style="display: flex; gap: 1rem; margin-top: 2rem;">
+                    <button type="button" class="btn btn-ghost" onclick="hideCreateModal()" style="flex: 1;">Cancel</button>
+                    <button type="submit" class="btn btn-primary" style="flex: 1;">Create Agent</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <script>
+        // Global state
+        let agents = [];
+        let templates = [];
+        let config = null;
+        let envVarCounter = 0;
+
+        const PROVIDER_MODELS = {
+            openai: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'],
+            anthropic: ['claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022', 'claude-3-opus-20240229'],
+            gemini: ['gemini-2.0-flash-exp', 'gemini-1.5-pro', 'gemini-1.5-flash'],
+            groq: ['llama-3.3-70b-versatile', 'mixtral-8x7b-32768', 'gemma2-9b-it'],
+            ollama: ['llama3.2', 'mistral', 'codellama'],
+            lmstudio: ['', '']  // User typically specifies local model
+        };
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', async () => {
+            await init();
+        });
+
+        async function init() {
+            try {
+                config = await invoke('get_config');
+
+                if (!config.has_completed_setup) {
+                    showView('wizard');
+                    document.getElementById('wizard-view').classList.add('active');
+                    document.getElementById('dashboard-view').classList.remove('active');
+                    document.getElementById('agents-view').classList.remove('active');
+                }
+
+                await loadTemplates();
+                await checkStatus();
+                await loadAgents();
+
+                setInterval(checkStatus, 10000);
+            } catch (e) {
+                console.error('Init error:', e);
+            }
+        }
+
+        function showView(viewName) {
+            document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+            document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+
+            const view = document.getElementById(viewName + '-view');
+            if (view) view.classList.add('active');
+
+            const btn = document.querySelector(`[data-view="${viewName}"]`);
+            if (btn) btn.classList.add('active');
+
+            // Populate settings when switching to settings view
+            if (viewName === 'settings' && config) {
+                document.getElementById('settings-orchestrator-url').value = config.orchestrator_url || config.orchestratorUrl || 'http://localhost:3000';
+                document.getElementById('settings-deployment-mode').value = config.deployment_mode || config.deploymentMode || 'windows-wsl';
+            }
+        }
+
+        async function checkStatus() {
+            try {
+                await invoke('health_check');
+                document.getElementById('orchestrator-status-dot').classList.add('online');
+                document.getElementById('orchestrator-status-text').textContent = 'Orchestrator Connected';
+            } catch (e) {
+                document.getElementById('orchestrator-status-dot').classList.remove('online');
+                document.getElementById('orchestrator-status-text').textContent = 'Orchestrator Disconnected';
+            }
+
+            try {
+                const dockerRunning = await invoke('check_docker');
+                const dot = document.getElementById('docker-status-dot');
+                const text = document.getElementById('docker-status-text');
+                if (dockerRunning) {
+                    dot.classList.add('online');
+                    text.textContent = 'Docker Running';
+                } else {
+                    dot.classList.remove('online');
+                    text.textContent = 'Docker Not Running';
+                }
+            } catch (e) {
+                console.error('Docker check failed:', e);
+            }
+        }
+
+        async function loadTemplates() {
+            try {
+                templates = await invoke('list_templates');
+
+                // Render quick templates
+                const container = document.getElementById('quick-templates');
+                container.innerHTML = templates.map(t => `
+                    <button class="template-chip" onclick="createFromTemplate('${t.id}')">
+                        ${t.name}
+                    </button>
+                `).join('');
+            } catch (e) {
+                console.error('Failed to load templates:', e);
+            }
+        }
+
+        async function loadAgents() {
+            const containers = [document.getElementById('dashboard-agents'), document.getElementById('all-agents')];
+
+            try {
+                agents = await invoke('list_agents');
+
+                if (agents.length === 0) {
+                    containers.forEach(c => {
+                        c.innerHTML = `
+                            <div class="empty-state">
+                                <div class="empty-state-icon">🦀</div>
+                                <h3>No agents yet</h3>
+                                <p>Create your first AI agent to get started</p>
+                            </div>
+                        `;
+                    });
+                    return;
+                }
+
+                const html = agents.map(agent => renderAgentCard(agent)).join('');
+                containers.forEach(c => c.innerHTML = html);
+            } catch (e) {
+                containers.forEach(c => {
+                    c.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">⚠️</div>
+                            <h3>Failed to load agents</h3>
+                            <p>Is the orchestrator running?</p>
+                        </div>
+                    `;
+                });
+            }
+        }
+
+        function renderAgentCard(agent) {
+            const isLocal = ['ollama', 'lmstudio', 'llamacpp', 'vllm'].includes(agent.config.llm_provider.toLowerCase());
+
+            return `
+                <div class="agent-card">
+                    <div class="agent-header">
+                        <div>
+                            <div class="agent-name">${agent.name}</div>
+                            <div class="agent-id">${agent.id}</div>
+                        </div>
+                        <span class="agent-status status-${agent.status.toLowerCase()}">${agent.status}</span>
+                    </div>
+
+                    <div class="agent-config">
+                        <div class="config-item">
+                            <span class="config-label">Provider</span>
+                            <span class="config-value ${isLocal ? 'local' : ''}">${agent.config.llm_provider}</span>
+                        </div>
+                        <div class="config-item">
+                            <span class="config-label">Model</span>
+                            <span class="config-value">${agent.config.llm_model || 'N/A'}</span>
+                        </div>
+                        <div class="config-item">
+                            <span class="config-label">Memory</span>
+                            <span class="config-value">${agent.config.memory_mb} MB</span>
+                        </div>
+                        <div class="config-item">
+                            <span class="config-label">CPU</span>
+                            <span class="config-value">${agent.config.cpu_cores} cores</span>
+                        </div>
+                    </div>
+
+                    <div class="agent-actions">
+                        ${agent.status === 'running'
+                            ? `<button class="btn btn-danger" onclick="stopAgent('${agent.id}')">Stop</button>`
+                            : `<button class="btn btn-success" onclick="startAgent('${agent.id}')">Start</button>`
+                        }
+                        <button class="btn btn-ghost" onclick="deleteAgent('${agent.id}')">Delete</button>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function startAgent(id) {
+            try {
+                await invoke('start_agent', { id });
+                await loadAgents();
+                showToast('Agent started', 'success');
+            } catch (e) {
+                showToast('Failed to start agent: ' + e, 'error');
+            }
+        }
+
+        async function stopAgent(id) {
+            try {
+                await invoke('stop_agent', { id });
+                await loadAgents();
+                showToast('Agent stopped', 'success');
+            } catch (e) {
+                showToast('Failed to stop agent: ' + e, 'error');
+            }
+        }
+
+        async function deleteAgent(id) {
+            if (!confirm('Are you sure you want to delete this agent?')) return;
+            try {
+                await invoke('delete_agent', { id });
+                await loadAgents();
+                showToast('Agent deleted', 'success');
+            } catch (e) {
+                showToast('Failed to delete agent: ' + e, 'error');
+            }
+        }
+
+        function showCreateModal() {
+            document.getElementById('create-modal').classList.add('active');
+            updateProviderDefaults();
+        }
+
+        function hideCreateModal() {
+            document.getElementById('create-modal').classList.remove('active');
+            document.getElementById('create-form').reset();
+            document.getElementById('env-vars-list').innerHTML = '';
+            document.getElementById('memory-value').textContent = '2048 MB';
+            envVarCounter = 0;
+        }
+
+        function updateMemoryValue() {
+            const value = document.getElementById('agent-memory').value;
+            document.getElementById('memory-value').textContent = value + ' MB';
+        }
+
+        function updateProviderDefaults() {
+            const provider = document.getElementById('agent-provider').value;
+            const models = PROVIDER_MODELS[provider] || [];
+            const modelInput = document.getElementById('agent-model');
+
+            if (models.length > 0) {
+                modelInput.value = models[0];
+                modelInput.placeholder = models.join(', ');
+            }
+
+            if (provider === 'ollama' || provider === 'lmstudio') {
+                modelInput.placeholder = 'Enter local model name...';
+            }
+        }
+
+        function addEnvVarRow() {
+            const container = document.getElementById('env-vars-list');
+            const row = document.createElement('div');
+            row.className = 'env-var-row';
+            row.id = `env-var-${envVarCounter++}`;
+            row.innerHTML = `
+                <input type="text" class="env-key" placeholder="KEY">
+                <input type="text" class="env-value" placeholder="value">
+                <button type="button" class="btn-icon" onclick="removeEnvVarRow(${envVarCounter - 1})">×</button>
+            `;
+            container.appendChild(row);
+        }
+
+        function removeEnvVarRow(id) {
+            const row = document.getElementById(`env-var-${id}`);
+            if (row) row.remove();
+        }
+
+        function toggleApiKeyVisibility() {
+            const input = document.getElementById('agent-api-key');
+            const btn = document.querySelector('.api-key-toggle');
+            if (input.type === 'password') {
+                input.type = 'text';
+                btn.textContent = 'Hide';
+            } else {
+                input.type = 'password';
+                btn.textContent = 'Show';
+            }
+        }
+
+        async function createAgent(event) {
+            event.preventDefault();
+
+            const name = document.getElementById('agent-name').value;
+            const provider = document.getElementById('agent-provider').value;
+            const model = document.getElementById('agent-model').value;
+            const memory = parseInt(document.getElementById('agent-memory').value);
+            const cpu = parseFloat(document.getElementById('agent-cpu').value);
+            const apiKey = document.getElementById('agent-api-key').value;
+
+            // Collect env vars
+            const envVars = {};
+            document.querySelectorAll('.env-var-row').forEach(row => {
+                const key = row.querySelector('.env-key').value.trim();
+                const value = row.querySelector('.env-value').value;
+                if (key) envVars[key] = value;
+            });
+
+            try {
+                await invoke('create_agent', {
+                    name,
+                    template: null,
+                    provider,
+                    model,
+                    memoryMb: memory,
+                    cpuCores: cpu,
+                    envVars,
+                    apiKey: apiKey || null
+                });
+
+                hideCreateModal();
+                await loadAgents();
+                showToast('Agent created successfully!', 'success');
+            } catch (e) {
+                showToast('Failed to create agent: ' + e, 'error');
+            }
+        }
+
+        async function createFromTemplate(templateId) {
+            const template = templates.find(t => t.id === templateId);
+            if (!template) return;
+
+            const name = prompt(`Enter a name for your ${template.name} agent:`);
+            if (!name) return;
+
+            try {
+                await invoke('create_agent', {
+                    name,
+                    template: templateId,
+                    provider: template.defaults.llm_provider,
+                    model: template.defaults.llm_model,
+                    memoryMb: template.defaults.memory_mb,
+                    cpuCores: template.defaults.cpu_cores,
+                    envVars: {},
+                    apiKey: null
+                });
+
+                await loadAgents();
+                showToast('Agent created from template!', 'success');
+            } catch (e) {
+                showToast('Failed to create agent: ' + e, 'error');
+            }
+        }
+
+        async function refreshAgents() {
+            await loadAgents();
+            await checkStatus();
+            showToast('Refreshed', 'success');
+        }
+
+        async function saveSettings() {
+            const orchestrator_url = document.getElementById('settings-orchestrator-url').value;
+            const deployment_mode = document.getElementById('settings-deployment-mode').value;
+
+            try {
+                await invoke('save_app_config', {
+                    orchestratorUrl: orchestrator_url,
+                    hasCompletedSetup: config.hasCompletedSetup || config.has_completed_setup,
+                    deploymentMode: deployment_mode
+                });
+
+                config = await invoke('get_config');
+                showToast('Settings saved', 'success');
+                await checkStatus();
+            } catch (e) {
+                showToast('Failed to save settings: ' + e, 'error');
+            }
+        }
+
+        // Wizard functions
+        function wizardNext(step) {
+            document.querySelectorAll('.wizard-step').forEach(s => s.classList.remove('active'));
+            document.getElementById(`wizard-step-${step}`).classList.add('active');
+
+            if (step === 2) {
+                runWizardChecks();
+            }
+        }
+
+        async function runWizardChecks() {
+            const url = document.getElementById('setup-orchestrator-url').value;
+
+            // Check orchestrator
+            try {
+                const orchestratorOk = await invoke('test_orchestrator_connection', { url });
+                document.getElementById('setup-orchestrator-status').textContent = orchestratorOk ? '✓ Connected' : '✗ Not reachable';
+                document.getElementById('setup-orchestrator-status').style.color = orchestratorOk ? 'var(--success)' : 'var(--danger)';
+            } catch (e) {
+                document.getElementById('setup-orchestrator-status').textContent = '✗ Not reachable';
+                document.getElementById('setup-orchestrator-status').style.color = 'var(--danger)';
+            }
+
+            // Check Docker
+            try {
+                const dockerOk = await invoke('check_docker');
+                document.getElementById('setup-docker-status').textContent = dockerOk ? '✓ Running' : '✗ Not running';
+                document.getElementById('setup-docker-status').style.color = dockerOk ? 'var(--success)' : 'var(--danger)';
+            } catch (e) {
+                document.getElementById('setup-docker-status').textContent = '✗ Not running';
+                document.getElementById('setup-docker-status').style.color = 'var(--danger)';
+            }
+        }
+
+        async function wizardFinish() {
+            const orchestrator_url = document.getElementById('setup-orchestrator-url').value;
+            const deployment_mode = document.getElementById('setup-deployment-mode').value;
+
+            try {
+                await invoke('save_app_config', {
+                    orchestratorUrl: orchestrator_url,
+                    hasCompletedSetup: true,
+                    deploymentMode: deployment_mode
+                });
+
+                config = await invoke('get_config');
+                showView('dashboard');
+            } catch (e) {
+                showToast('Failed to save configuration: ' + e, 'error');
+            }
+        }
+
+        function showToast(message, type = 'success') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.textContent = message;
+            container.appendChild(toast);
+
+            setTimeout(() => {
+                toast.remove();
+            }, 3000);
+        }
+
+        // Tauri invoke wrapper
+        async function invoke(cmd, args = {}) {
+            if (window.__TAURI__) {
+                return await window.__TAURI__.core.invoke(cmd, args);
+            } else {
+                // Fallback for browser testing
+                console.log(`Invoke: ${cmd}`, args);
+                return {};
+            }
+        }
+    </script>
+</body>
+</html>

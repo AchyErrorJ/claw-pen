@@ -5,14 +5,16 @@ use anyhow::Result;
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::process::Command;
+use tokio::sync::mpsc;
 
-use crate::types::{AgentContainer, AgentConfig, AgentStatus, ResourceUsage, LlmProvider};
+use crate::types::{AgentContainer, AgentConfig, AgentStatus, ResourceUsage, LlmProvider, LogEntry, VolumeMount};
 use crate::container::ContainerRuntime;
 
 pub struct ContainmentClient {
     /// Path to containment binary (or wsl command on Windows)
     runtime_path: String,
     /// WSL distro name (only used on Windows)
+    #[allow(dead_code)]
     wsl_distro: Option<String>,
 }
 
@@ -85,6 +87,10 @@ impl ContainmentClient {
                     config: AgentConfig::default(),
                     tailscale_ip: None,
                     resource_usage: None,
+                    project: None,
+                    tags: vec![],
+                    restart_policy: Default::default(),
+                    health_status: None,
                 });
             }
         }
@@ -109,6 +115,7 @@ impl ContainmentClient {
                 "mount": true,
                 "uts": true,
             },
+            "mounts": self.build_mounts(&config.volumes),
         });
 
         let output = self.build_command()
@@ -153,14 +160,128 @@ impl ContainmentClient {
         Ok(())
     }
 
-    async fn get_stats_internal(&self, _id: &str) -> Result<Option<ResourceUsage>> {
-        // TODO: Implement stats collection
-        Ok(None)
+    async fn get_stats_internal(&self, id: &str) -> Result<Option<ResourceUsage>> {
+        // Read from /sys/fs/cgroup for the container
+        let cgroup_path = format!("/sys/fs/cgroup/claw-pen/{}", id);
+
+        // Memory usage
+        let memory_current = std::fs::read_to_string(format!("{}/memory.current", cgroup_path))
+            .ok()
+            .and_then(|s| s.trim().parse::<u64>().ok())
+            .unwrap_or(0);
+
+        // CPU usage
+        let cpu_stat = std::fs::read_to_string(format!("{}/cpu.stat", cgroup_path))
+            .ok()
+            .unwrap_or_default();
+
+        // Parse usage_usec from cpu.stat
+        let cpu_usec: u64 = cpu_stat
+            .lines()
+            .find(|l| l.starts_with("usage_usec"))
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(0);
+
+        // Convert to percentage (very rough estimate)
+        let cpu_percent = if cpu_usec > 0 {
+            (cpu_usec as f32 / 1_000_000.0) % 100.0
+        } else {
+            0.0
+        };
+
+        Ok(Some(ResourceUsage {
+            memory_mb: memory_current as f32 / (1024.0 * 1024.0),
+            cpu_percent,
+            network_rx_bytes: 0, // TODO: from /proc/net/dev
+            network_tx_bytes: 0,
+        }))
     }
 
     async fn container_exists_internal(&self, id: &str) -> Result<bool> {
         let containers = self.list_containers_internal().await?;
         Ok(containers.iter().any(|c| &c.id == id))
+    }
+
+    pub async fn get_logs(&self, id: &str, tail: usize) -> Result<Vec<LogEntry>> {
+        let log_path = format!("/var/lib/openclaw/containers/{}/logs/container.log", id);
+
+        if !std::path::Path::new(&log_path).exists() {
+            return Ok(vec![]);
+        }
+
+        let content = std::fs::read_to_string(&log_path)?;
+        let all_lines: Vec<&str> = content.lines().collect();
+        let start = all_lines.len().saturating_sub(tail);
+        let lines = &all_lines[start..];
+
+        let logs = lines
+            .iter()
+            .map(|line| {
+                // Try to parse as JSON log, otherwise treat as plain text
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(line) {
+                    LogEntry {
+                        timestamp: json["timestamp"].as_str().unwrap_or("").to_string(),
+                        level: json["level"].as_str().unwrap_or("info").to_string(),
+                        message: json["message"].as_str().unwrap_or(line).to_string(),
+                    }
+                } else {
+                    LogEntry {
+                        timestamp: chrono::Utc::now().to_rfc3339(),
+                        level: "info".to_string(),
+                        message: line.to_string(),
+                    }
+                }
+            })
+            .collect();
+
+        Ok(logs)
+    }
+
+    pub async fn stream_logs(&self, id: &str) -> tokio_stream::wrappers::ReceiverStream<LogEntry> {
+        let (tx, rx) = mpsc::channel(100);
+        let log_path = format!("/var/lib/openclaw/containers/{}/logs/container.log", id);
+        let id = id.to_string();
+
+        tokio::spawn(async move {
+            // Simple tail -f implementation
+            let mut last_size = 0u64;
+
+            loop {
+                tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+
+                if let Ok(metadata) = std::fs::metadata(&log_path) {
+                    let size = metadata.len();
+
+                    if size > last_size {
+                        // Read new content
+                        if let Ok(content) = std::fs::read_to_string(&log_path) {
+                            let new_content = &content[last_size as usize..];
+                            for line in new_content.lines() {
+                                let entry = LogEntry {
+                                    timestamp: chrono::Utc::now().to_rfc3339(),
+                                    level: "info".to_string(),
+                                    message: line.to_string(),
+                                };
+                                if tx.send(entry).await.is_err() {
+                                    return;
+                                }
+                            }
+                        }
+                        last_size = size;
+                    }
+                }
+            }
+        });
+
+        tokio_stream::wrappers::ReceiverStream::new(rx)
+    }
+
+    pub async fn health_check(&self, id: &str) -> Result<bool> {
+        // Execute health check command in container
+        // For now, just check if container is running
+        let containers = self.list_containers_internal().await?;
+        Ok(containers.iter().any(|c| c.id == id && c.status == AgentStatus::Running))
     }
 
     /// Build environment variables from agent config
@@ -210,7 +331,27 @@ impl ContainmentClient {
         // Note: OAuth providers (Kimi, z.ai) get tokens from OpenClaw gateway
         // No API keys needed in container env
 
+        // Secrets are mounted at /run/secrets/ not in env
+        for secret in &config.secrets {
+            env.insert(format!("HAS_SECRET_{}", secret), "true".to_string());
+        }
+
         env
+    }
+
+    /// Build mount specifications
+    fn build_mounts(&self, volumes: &[VolumeMount]) -> Vec<serde_json::Value> {
+        volumes
+            .iter()
+            .map(|v| {
+                serde_json::json!({
+                    "type": "bind",
+                    "source": v.source,
+                    "target": v.target,
+                    "readonly": v.read_only,
+                })
+            })
+            .collect()
     }
 }
 
