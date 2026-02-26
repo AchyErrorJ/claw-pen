@@ -4,7 +4,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
-use crate::types::{AgentContainer, AgentConfig, ResourceUsage, LlmProvider, AgentStatus};
+use crate::types::{AgentContainer, AgentConfig, ResourceUsage, LlmProvider, AgentStatus, LogEntry};
 use crate::containment::ContainmentClient;
 
 /// Container runtime trait - abstracts over different backends
@@ -30,6 +30,15 @@ pub trait ContainerRuntime: Send + Sync {
 
     /// Check if a container exists in the runtime
     async fn container_exists(&self, id: &str) -> Result<bool>;
+
+    /// Get logs for a container
+    async fn get_logs(&self, id: &str, tail: usize) -> Result<Vec<LogEntry>>;
+
+    /// Stream logs as they arrive
+    async fn stream_logs(&self, id: &str) -> tokio_stream::wrappers::ReceiverStream<LogEntry>;
+
+    /// Run health check
+    async fn health_check(&self, id: &str) -> Result<bool>;
 }
 
 /// Runtime client that uses either Containment or Docker based on availability
@@ -110,6 +119,27 @@ impl ContainerRuntime for RuntimeClient {
         match &self.inner {
             RuntimeClientInner::Docker(client) => client.container_exists(id).await,
             RuntimeClientInner::Containment(client) => client.container_exists(id).await,
+        }
+    }
+
+    async fn get_logs(&self, id: &str, tail: usize) -> Result<Vec<LogEntry>> {
+        match &self.inner {
+            RuntimeClientInner::Docker(client) => client.get_logs(id, tail).await,
+            RuntimeClientInner::Containment(client) => client.get_logs(id, tail).await,
+        }
+    }
+
+    async fn stream_logs(&self, id: &str) -> tokio_stream::wrappers::ReceiverStream<LogEntry> {
+        match &self.inner {
+            RuntimeClientInner::Docker(client) => client.stream_logs(id).await,
+            RuntimeClientInner::Containment(client) => client.stream_logs(id).await,
+        }
+    }
+
+    async fn health_check(&self, id: &str) -> Result<bool> {
+        match &self.inner {
+            RuntimeClientInner::Docker(client) => client.health_check(id).await,
+            RuntimeClientInner::Containment(client) => client.health_check(id).await,
         }
     }
 }
@@ -276,6 +306,10 @@ impl ContainerRuntime for DockerClient {
                     config: AgentConfig::default(),
                     tailscale_ip: None,
                     resource_usage: None,
+                    project: None,
+                    tags: vec![],
+                    restart_policy: Default::default(),
+                    health_status: None,
                 });
             }
         }
@@ -366,5 +400,21 @@ impl ContainerRuntime for DockerClient {
             }
             Err(e) => Err(anyhow::anyhow!("Failed to check container: {}", e)),
         }
+    }
+
+    async fn get_logs(&self, id: &str, tail: usize) -> Result<Vec<LogEntry>> {
+        // TODO: Implement Docker logs
+        Ok(vec![])
+    }
+
+    async fn stream_logs(&self, id: &str) -> tokio_stream::wrappers::ReceiverStream<LogEntry> {
+        // TODO: Implement Docker log streaming
+        let (_tx, rx) = tokio::sync::mpsc::channel(10);
+        tokio_stream::wrappers::ReceiverStream::new(rx)
+    }
+
+    async fn health_check(&self, id: &str) -> Result<bool> {
+        // For Docker, check if container is running
+        self.container_exists(id).await
     }
 }
