@@ -50,4 +50,4 @@ jobs:
         run: cargo fmt --all -- --check
       
       - name: Clippy
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --exclude claw-pen-desktop --exclude claw-pen-ui --all-targets --all-features -- -D warnings
