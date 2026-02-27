@@ -1108,14 +1108,16 @@
 
             try {
                 await invoke('create_agent', {
-                    name,
-                    template: null,
-                    provider,
-                    model,
-                    memoryMb: memory,
-                    cpuCores: cpu,
-                    envVars,
-                    apiKey: apiKey || null
+                    params: {
+                        name,
+                        template: null,
+                        provider,
+                        model,
+                        memory_mb: memory,
+                        cpu_cores: cpu,
+                        env_vars: envVars,
+                        api_key: apiKey || null
+                    }
                 });
 
                 hideCreateModal();
@@ -1135,14 +1137,16 @@
 
             try {
                 await invoke('create_agent', {
-                    name,
-                    template: templateId,
-                    provider: template.defaults.llm_provider,
-                    model: template.defaults.llm_model,
-                    memoryMb: template.defaults.memory_mb,
-                    cpuCores: template.defaults.cpu_cores,
-                    envVars: {},
-                    apiKey: null
+                    params: {
+                        name,
+                        template: templateId,
+                        provider: template.defaults.llm_provider,
+                        model: template.defaults.llm_model,
+                        memory_mb: template.defaults.memory_mb,
+                        cpu_cores: template.defaults.cpu_cores,
+                        env_vars: {},
+                        api_key: null
+                    }
                 });
 
                 await loadAgents();
@@ -1164,9 +1168,9 @@
 
             try {
                 await invoke('save_app_config', {
-                    orchestratorUrl: orchestrator_url,
-                    hasCompletedSetup: config.hasCompletedSetup || config.has_completed_setup,
-                    deploymentMode: deployment_mode
+                    orchestrator_url: orchestrator_url,
+                    has_completed_setup: config.hasCompletedSetup || config.has_completed_setup,
+                    deployment_mode: deployment_mode
                 });
 
                 config = await invoke('get_config');
