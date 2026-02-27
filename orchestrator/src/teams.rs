@@ -11,6 +11,19 @@ use tokio::sync::RwLock;
 
 use crate::types::*;
 
+// Default functions for serde
+fn default_router_mode() -> RouterMode {
+    RouterMode::Hybrid
+}
+
+fn default_confidence_threshold() -> f32 {
+    0.7
+}
+
+fn default_true() -> bool {
+    true
+}
+
 /// Team configuration loaded from TOML
 #[derive(Debug, Clone, Deserialize)]
 struct TeamConfig {

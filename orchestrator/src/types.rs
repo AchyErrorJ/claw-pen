@@ -60,6 +60,9 @@ pub struct AgentConfig {
     /// Volumes to mount
     #[serde(default)]
     pub volumes: Vec<VolumeMount>,
+    /// API key for the LLM provider (stored encrypted)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
 }
 
 fn default_memory() -> u32 {
@@ -78,6 +81,8 @@ pub enum LlmProvider {
     Gemini,
     Kimi,
     Zai,
+    KimiCode,
+    Access,
     Huggingface,
     Ollama,
     LlamaCpp,

@@ -28,6 +28,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Error handling
 anyhow = "1"
+num_cpus = "1.16"
 thiserror = "1"
 
 # Utils
