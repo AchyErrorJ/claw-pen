@@ -24,7 +24,7 @@ import toml
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
 
-from sources import scrape_kijiji, scrape_facebook, scrape_municipal
+from sources import scrape_kijiji, scrape_facebook, scrape_municipal, scrape_rss
 from notifier import Notifier, Lead
 
 # Configure logging
@@ -147,24 +147,87 @@ class LeadMemory:
 
 class LeadHunter:
     """Main Lead Hunter agent."""
-    
+
     def __init__(self, config_path: str = None, dry_run: bool = False):
         self.config = self._load_config(config_path)
         self.dry_run = dry_run
         self.logger = setup_logging(self.config)
-        
+
         self.memory = LeadMemory(self.config)
         self.notifier = Notifier(self.config)
-        
+
+        # Load exclude keywords for filtering
+        self.exclude_keywords = self.config.get("search", {}).get("exclude_keywords", [])
+        self.exclude_service_keywords = self.config.get("search", {}).get("exclude_service_keywords", [])
+
         # Stats for this run
         self.stats = {
             "total_found": 0,
             "new_leads": 0,
             "duplicates": 0,
+            "filtered_out": 0,
             "notified": 0,
             "errors": 0,
             "sources": [],
         }
+
+    def _is_job_posting(self, lead_data: dict) -> bool:
+        """Check if a lead looks like a job posting (hiring workers, not seeking services)."""
+        title = lead_data.get("title", "").lower()
+        description = lead_data.get("description", "").lower()
+        combined = f"{title} {description}"
+
+        for keyword in self.exclude_keywords:
+            if keyword.lower() in combined:
+                return True
+
+        # Additional heuristics for job postings
+        job_patterns = [
+            r"now hiring",
+            r"we are hiring",
+            r"hiring \$\d+",
+            r"\$\d+/hr",
+            r"\$\d+ per hour",
+            r"full[\s-]time",
+            r"part[\s-]time",
+            r"immediate start",
+            r"apply now",
+            r"send resume",
+        ]
+
+        import re
+        for pattern in job_patterns:
+            if re.search(pattern, combined, re.IGNORECASE):
+                return True
+
+        return False
+
+    def _is_service_ad(self, lead_data: dict) -> bool:
+        """Check if a lead is a service advertisement (not a homeowner seeking help)."""
+        title = lead_data.get("title", "").lower()
+        description = lead_data.get("description", "").lower()
+        combined = f"{title} {description}"
+
+        for keyword in self.exclude_service_keywords:
+            if keyword.lower() in combined:
+                return True
+
+        # Additional heuristics for service ads
+        import re
+        service_patterns = [
+            r"we (provide|offer|specialize)",
+            r"call \d{3}[\s-]?\d{3}[\s-]?\d{4}",
+            r"free (quote|estimate|consultation)",
+            r"licensed\s*&\s*insured",
+            r"fast\s*&\s*affordable",
+            r"\d+\+?\s*years?\s*(of\s+)?experience",
+        ]
+
+        for pattern in service_patterns:
+            if re.search(pattern, combined, re.IGNORECASE):
+                return True
+
+        return False
     
     def _load_config(self, config_path: str = None) -> dict:
         """Load configuration from TOML file."""
@@ -187,6 +250,7 @@ class LeadHunter:
         start_time = datetime.now()
         
         # Run all enabled scrapers
+        self._run_rss()
         self._run_kijiji()
         self._run_facebook()  # Stub
         self._run_municipal()  # Stub
@@ -205,11 +269,23 @@ class LeadHunter:
         """Run Kijiji scraper."""
         self.logger.info("Running Kijiji scraper...")
         self.stats["sources"].append("kijiji")
-        
+
         try:
             for lead_data in scrape_kijiji(self.config):
+                # Filter out job postings
+                if self._is_job_posting(lead_data):
+                    self.stats["filtered_out"] += 1
+                    self.logger.debug(f"Filtered job posting: {lead_data.get('title', '')[:50]}...")
+                    continue
+
+                # Filter out service ads (businesses offering services)
+                if self._is_service_ad(lead_data):
+                    self.stats["filtered_out"] += 1
+                    self.logger.debug(f"Filtered service ad: {lead_data.get('title', '')[:50]}...")
+                    continue
+
                 self.stats["total_found"] += 1
-                
+
                 lead = Lead(
                     title=lead_data.get("title", "Unknown"),
                     url=lead_data.get("url", ""),
@@ -219,20 +295,73 @@ class LeadHunter:
                     posted_time=lead_data.get("posted_time"),
                     source="kijiji",
                 )
-                
+
                 if self.memory.add_lead(lead):
                     self.stats["new_leads"] += 1
                     self.logger.info(f"New lead: {lead.title[:50]}...")
-                    
+
                     if not self.dry_run:
                         if self.notifier.send_lead(lead):
                             self.stats["notified"] += 1
                 else:
                     self.stats["duplicates"] += 1
                     self.logger.debug(f"Duplicate: {lead.title[:50]}...")
-                    
+
         except Exception as e:
             self.logger.error(f"Kijiji scraper error: {e}")
+            self.stats["errors"] += 1
+
+    def _run_rss(self):
+        """Run RSS feed scraper (Google Alerts, etc.)."""
+        rss_config = self.config.get("rss", {})
+        feeds = rss_config.get("feeds", [])
+
+        if not feeds:
+            self.logger.info("No RSS feeds configured, skipping")
+            return
+
+        self.logger.info(f"Running RSS scraper ({len(feeds)} feeds)...")
+        self.stats["sources"].append("rss")
+
+        try:
+            for lead_data in scrape_rss(self.config):
+                # Filter out job postings
+                if self._is_job_posting(lead_data):
+                    self.stats["filtered_out"] += 1
+                    self.logger.debug(f"Filtered job posting: {lead_data.get('title', '')[:50]}...")
+                    continue
+
+                # Filter out service ads
+                if self._is_service_ad(lead_data):
+                    self.stats["filtered_out"] += 1
+                    self.logger.debug(f"Filtered service ad: {lead_data.get('title', '')[:50]}...")
+                    continue
+
+                self.stats["total_found"] += 1
+
+                lead = Lead(
+                    title=lead_data.get("title", "Unknown"),
+                    url=lead_data.get("url", ""),
+                    location=lead_data.get("location", ""),
+                    description=lead_data.get("description", ""),
+                    budget=lead_data.get("budget"),
+                    posted_time=lead_data.get("posted_time"),
+                    source=lead_data.get("source", "rss"),
+                )
+
+                if self.memory.add_lead(lead):
+                    self.stats["new_leads"] += 1
+                    self.logger.info(f"New lead: {lead.title[:50]}...")
+
+                    if not self.dry_run:
+                        if self.notifier.send_lead(lead):
+                            self.stats["notified"] += 1
+                else:
+                    self.stats["duplicates"] += 1
+                    self.logger.debug(f"Duplicate: {lead.title[:50]}...")
+
+        except Exception as e:
+            self.logger.error(f"RSS scraper error: {e}")
             self.stats["errors"] += 1
     
     def _run_facebook(self):
@@ -251,6 +380,7 @@ class LeadHunter:
         self.logger.info("LEAD HUNTER SUMMARY")
         self.logger.info("=" * 50)
         self.logger.info(f"Total leads found:    {self.stats['total_found']}")
+        self.logger.info(f"Job postings filtered: {self.stats['filtered_out']}")
         self.logger.info(f"New leads:            {self.stats['new_leads']}")
         self.logger.info(f"Duplicates skipped:   {self.stats['duplicates']}")
         self.logger.info(f"Notifications sent:   {self.stats['notified']}")
