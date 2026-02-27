@@ -28,12 +28,12 @@ pub struct ZerotierBackend {
 }
 
 /// Headscale backend - self-hosted Tailscale control plane
-/// 
+///
 /// Headscale uses the same Tailscale client, but points to your own server
 /// instead of Tailscale's SaaS. This gives you full control over your mesh network.
 ///
 /// # Setup Guide
-/// 
+///
 /// 1. **Deploy Headscale server** (see https://headscale.net):
 ///    ```bash
 ///    # Using Docker
@@ -42,17 +42,17 @@ pub struct ZerotierBackend {
 ///      -p 8080:8080 \
 ///      headscale/headscale:latest
 ///    ```
-/// 
+///
 /// 2. **Create a namespace** (like a Tailscale tailnet):
 ///    ```bash
 ///    headscale namespaces create claw-pen
 ///    ```
-/// 
+///
 /// 3. **Generate a pre-auth key**:
 ///    ```bash
 ///    headscale preauthkeys create --namespace claw-pen --reusable
 ///    ```
-/// 
+///
 /// 4. **Configure claw-pen** (environment variables or .env):
 ///    ```bash
 ///    NETWORK_BACKEND=headscale
@@ -60,14 +60,14 @@ pub struct ZerotierBackend {
 ///    HEADSCALE_AUTH_KEY=<your-pre-auth-key>
 ///    HEADSCALE_NAMESPACE=claw-pen  # optional, defaults to "claw-pen"
 ///    ```
-/// 
+///
 /// 5. **Container requirements**:
 ///    Containers must have the Tailscale client installed.
 ///    The client will automatically connect to your Headscale server
 ///    using the `--login-server` flag.
-/// 
+///
 /// # How It Works
-/// 
+///
 /// When a container is created with `network_backend = "headscale"`:
 /// - The container runs: `tailscale up --login-server=${HEADSCALE_URL} --authkey=${HEADSCALE_AUTH_KEY}`
 /// - If `HEADSCALE_NAMESPACE` is set, it's used as the advertised hostname prefix

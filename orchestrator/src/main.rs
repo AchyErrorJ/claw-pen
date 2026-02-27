@@ -13,13 +13,12 @@ mod templates;
 mod types;
 
 use axum::{
-    routing::{delete, get, post, put},
+    routing::{delete, get, post},
     Router,
 };
 use container::ContainerRuntime;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tower_http::cors::{Any, CorsLayer};
 
 use crate::secrets::SecretsManager;
 use crate::snapshots::SnapshotManager;
@@ -138,16 +137,30 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/agents/:id/chat", get(api::chat_websocket))
         .route("/api/agents/:id/metrics", get(api::get_metrics))
         .route("/api/agents/:id/health", post(api::run_health_check))
-        .route("/api/agents/:id/secrets", get(api::list_secrets).post(api::set_secret))
+        .route(
+            "/api/agents/:id/secrets",
+            get(api::list_secrets).post(api::set_secret),
+        )
         .route("/api/agents/:id/secrets/:name", delete(api::delete_secret))
-        .route("/api/agents/:id/snapshots", get(api::list_snapshots).post(api::create_snapshot))
-        .route("/api/agents/:id/snapshots/:snapshot_id/restore", post(api::restore_snapshot))
-        .route("/api/agents/:id/snapshots/:snapshot_id", delete(api::delete_snapshot))
+        .route(
+            "/api/agents/:id/snapshots",
+            get(api::list_snapshots).post(api::create_snapshot),
+        )
+        .route(
+            "/api/agents/:id/snapshots/:snapshot_id/restore",
+            post(api::restore_snapshot),
+        )
+        .route(
+            "/api/agents/:id/snapshots/:snapshot_id",
+            delete(api::delete_snapshot),
+        )
         .route("/api/agents/:id/export", get(api::export_agent))
         // Generic :id routes come after all specific routes
         .route(
             "/api/agents/:id",
-            get(api::get_agent).put(api::update_agent).delete(api::delete_agent),
+            get(api::get_agent)
+                .put(api::update_agent)
+                .delete(api::delete_agent),
         )
         .route("/api/agents", get(api::list_agents).post(api::create_agent))
         // Batch operations
@@ -158,7 +171,10 @@ async fn main() -> anyhow::Result<()> {
         // Templates
         .route("/api/templates", get(api::list_templates))
         // Projects
-        .route("/api/projects", get(api::list_projects).post(api::create_project))
+        .route(
+            "/api/projects",
+            get(api::list_projects).post(api::create_project),
+        )
         // Teams
         .route("/api/teams", get(api::list_teams))
         .route("/api/teams/:id", get(api::get_team))

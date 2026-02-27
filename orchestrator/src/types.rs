@@ -464,6 +464,7 @@ impl Default for ResponseTemplates {
 
 /// Request to create a new team
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct CreateTeamRequest {
     pub name: String,
     pub description: Option<String>,
@@ -487,6 +488,7 @@ pub struct ClassificationResult {
 
 /// A message being routed through a team
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct RoutedMessage {
     pub team_id: String,
     pub conversation_id: String,

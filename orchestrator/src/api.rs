@@ -726,10 +726,7 @@ pub async fn chat_websocket(
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Agent not found".to_string()))?;
 
     if agent.status != AgentStatus::Running {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "Agent is not running".to_string(),
-        ));
+        return Err((StatusCode::BAD_REQUEST, "Agent is not running".to_string()));
     }
 
     let agent_id = agent.id.clone();
@@ -761,7 +758,10 @@ async fn handle_chat_stream(socket: WebSocket, _state: Arc<AppState>, _agent_id:
             Ok(Message::Text(text)) => {
                 // Parse the incoming message
                 if let Ok(msg_data) = serde_json::from_str::<serde_json::Value>(&text) {
-                    let user_content = msg_data.get("content").and_then(|c| c.as_str()).unwrap_or(&text);
+                    let user_content = msg_data
+                        .get("content")
+                        .and_then(|c| c.as_str())
+                        .unwrap_or(&text);
 
                     // TODO: Forward to actual agent container via its own WebSocket/API
                     // For now, echo back with a placeholder response
@@ -844,9 +844,7 @@ pub async fn team_chat_websocket(
     let team_id = team.id.clone();
     let team_name = team.name.clone();
 
-    Ok(ws.on_upgrade(move |socket| {
-        handle_team_chat_stream(socket, state, team_id, team_name)
-    }))
+    Ok(ws.on_upgrade(move |socket| handle_team_chat_stream(socket, state, team_id, team_name)))
 }
 
 async fn handle_team_chat_stream(

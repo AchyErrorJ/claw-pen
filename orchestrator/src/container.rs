@@ -101,7 +101,7 @@ impl RuntimeClient {
         self.headscale_url = headscale_url.clone();
         self.headscale_auth_key = headscale_auth_key.clone();
         self.headscale_namespace = headscale_namespace.clone();
-        
+
         // If using Docker, update the inner client with network config
         if let RuntimeClientInner::Docker(ref docker) = self.inner {
             let new_docker = DockerClient::with_network_backend(
@@ -113,7 +113,7 @@ impl RuntimeClient {
             );
             self.inner = RuntimeClientInner::Docker(new_docker);
         }
-        
+
         self
     }
 }
@@ -231,7 +231,7 @@ impl DockerClient {
         };
 
         tracing::info!("Connected to Docker runtime");
-        Ok(Self { 
+        Ok(Self {
             docker,
             network_backend: NetworkBackend::default(),
             headscale_url: None,
@@ -322,7 +322,7 @@ impl DockerClient {
     /// These are passed to containers so they can join the Headscale mesh
     fn build_headscale_env_vars(&self) -> Vec<String> {
         let mut env = Vec::new();
-        
+
         if matches!(self.network_backend, NetworkBackend::Headscale) {
             if let Some(ref url) = self.headscale_url {
                 // Headscale server URL - containers use this with --login-server
@@ -341,7 +341,7 @@ impl DockerClient {
             // Flag to indicate Headscale mode (container entrypoint can check this)
             env.push("TAILSCALE_LOGIN_SERVER=${HEADSCALE_URL}".to_string());
         }
-        
+
         env
     }
 
@@ -435,11 +435,11 @@ impl ContainerRuntime for DockerClient {
     async fn create_container(&self, name: &str, config: &AgentConfig) -> Result<String> {
         let image = Self::get_image_for_provider(&config.llm_provider);
         let mut env = Self::build_env_vars(config);
-        
+
         // Add Headscale environment variables if using Headscale backend
         let headscale_env = self.build_headscale_env_vars();
         env.extend(headscale_env);
-        
+
         let labels = Self::build_labels(name, &config.llm_provider);
 
         // Container configuration

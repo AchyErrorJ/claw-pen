@@ -2,7 +2,6 @@
 
 use anyhow::Result;
 use std::collections::HashMap;
-use std::io::Write;
 use std::path::PathBuf;
 
 use crate::types::SecretInfo;

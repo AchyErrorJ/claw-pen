@@ -1,2 +1,2 @@
-pub mod dashboard;
 pub mod chat;
+pub mod dashboard;

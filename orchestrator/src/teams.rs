@@ -4,10 +4,9 @@
 //! incoming messages and routes them to the appropriate specialist agent.
 
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::types::*;
@@ -220,9 +219,8 @@ impl Router {
 
         match best_match {
             Some((intent, confidence, matched_keywords)) => {
-                let needs_clarification =
-                    confidence < self.team.router.confidence_threshold
-                        && self.team.router.clarify_on_low_confidence;
+                let needs_clarification = confidence < self.team.router.confidence_threshold
+                    && self.team.router.clarify_on_low_confidence;
 
                 ClassificationResult {
                     intent,
@@ -260,7 +258,7 @@ impl Router {
 
     /// Generate clarification message
     pub fn generate_clarification(&self) -> String {
-        let mut options: Vec<String> = self
+        let options: Vec<String> = self
             .team
             .agents
             .iter()

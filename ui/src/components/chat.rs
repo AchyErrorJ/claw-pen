@@ -2,8 +2,8 @@ use crate::types::AgentContainer;
 use gloo_net::websocket::futures::WebSocket;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
-use yew::prelude::*;
 use yew::events::MouseEvent;
+use yew::prelude::*;
 
 const MAX_MESSAGES: usize = 100;
 

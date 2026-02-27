@@ -1,8 +1,8 @@
 use crate::api;
-use crate::types::{AgentContainer, AgentStatus};
 use crate::components::chat::ChatPanel;
-use yew::prelude::*;
+use crate::types::{AgentContainer, AgentStatus};
 use yew::events::MouseEvent;
+use yew::prelude::*;
 
 #[function_component(Dashboard)]
 pub fn dashboard() -> Html {
