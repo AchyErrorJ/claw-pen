@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use std::path::Path;
 
 #[derive(Debug, Deserialize, Clone, PartialEq, Default)]
 #[serde(rename_all = "kebab-case")]
@@ -58,10 +59,47 @@ pub struct ModelServerConfig {
     pub default_model: Option<String>,
 }
 
+/// Config file locations to search (in order of priority)
+const CONFIG_FILE_NAMES: &[&str] = &[
+    "claw-pen.toml",
+    "claw-pen.yaml",
+    "claw-pen.yml",
+    "claw-pen.json",
+];
+
+const CONFIG_DIRS: &[&str] = &[
+    ".", // Current directory
+    ".config/claw-pen",
+    "~/.config/claw-pen",
+    "/etc/claw-pen",
+];
+
+fn find_config_file() -> Option<std::path::PathBuf> {
+    for dir in CONFIG_DIRS {
+        let dir_path = if dir.starts_with('~') {
+            if let Some(home) = dirs::home_dir() {
+                home.join(dir.strip_prefix("~/").unwrap_or(""))
+            } else {
+                continue;
+            }
+        } else {
+            std::path::PathBuf::from(dir)
+        };
+
+        for name in CONFIG_FILE_NAMES {
+            let path = dir_path.join(name);
+            if path.exists() {
+                return Some(path);
+            }
+        }
+    }
+    None
+}
+
 pub fn load() -> anyhow::Result<Config> {
     dotenvy::dotenv().ok();
 
-    let config = config::Config::builder()
+    let mut builder = config::Config::builder()
         .set_default("deployment_mode", "windows-wsl")?
         .set_default("network_backend", "tailscale")?
         .set_default("runtime_socket", "/var/run/claw-pen.sock")?
@@ -73,7 +111,25 @@ pub fn load() -> anyhow::Result<Config> {
         .set_default("model_servers.llama_cpp", None::<String>)?
         .set_default("model_servers.vllm", None::<String>)?
         .set_default("model_servers.lm_studio", None::<String>)?
-        .set_default("andor_bridge", None::<String>)?
+        .set_default("andor_bridge", None::<String>)?;
+
+    // Load from config file if found
+    if let Some(config_path) = find_config_file() {
+        tracing::info!("Loading config from: {}", config_path.display());
+        let extension = config_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("toml");
+
+        builder = builder.add_source(match extension {
+            "yaml" | "yml" => config::File::from(config_path).format(config::FileFormat::Yaml),
+            "json" => config::File::from(config_path).format(config::FileFormat::Json),
+            _ => config::File::from(config_path).format(config::FileFormat::Toml),
+        });
+    }
+
+    // Environment variables override file config
+    let config = builder
         .add_source(config::Environment::default().separator("__"))
         .build()?;
 

@@ -96,6 +96,23 @@ pub async fn create_agent(
     }
 
     // Create container
+
+    // Inject API key from agent config
+    if let Some(ref key) = config.api_key {
+        let key_var = match config.llm_provider {
+            LlmProvider::Zai => "ZAI_API_KEY",
+            LlmProvider::Anthropic => "ANTHROPIC_API_KEY",
+            LlmProvider::OpenAI => "OPENAI_API_KEY",
+            LlmProvider::Kimi => "KIMI_API_KEY",
+            LlmProvider::KimiCode => "KIMI_CODE_API_KEY",
+            LlmProvider::Gemini => "GOOGLE_API_KEY",
+            LlmProvider::Access => "ACCESS_API_KEY",
+            LlmProvider::Huggingface => "HF_TOKEN",
+            _ => "API_KEY",
+        };
+        config.env_vars.insert(key_var.to_string(), key.clone());
+    }
+
     let id = state
         .runtime
         .create_container(&req.name, &config)
@@ -249,6 +266,22 @@ pub async fn start_agent(
 
     if !container_exists {
         // Create the container for this stored agent
+
+        // Inject API key from agent config
+        if let Some(ref key) = agent.config.api_key {
+            let key_var = match agent.config.llm_provider {
+                LlmProvider::Zai => "ZAI_API_KEY",
+                LlmProvider::Anthropic => "ANTHROPIC_API_KEY",
+                LlmProvider::OpenAI => "OPENAI_API_KEY",
+                LlmProvider::Kimi => "KIMI_API_KEY",
+                LlmProvider::KimiCode => "KIMI_CODE_API_KEY",
+                LlmProvider::Gemini => "GOOGLE_API_KEY",
+                LlmProvider::Access => "ACCESS_API_KEY",
+                LlmProvider::Huggingface => "HF_TOKEN",
+                _ => "API_KEY",
+            };
+            agent.config.env_vars.insert(key_var.to_string(), key.clone());
+        }
         let new_id = state
             .runtime
             .create_container(&agent.name, &agent.config)
@@ -472,6 +505,80 @@ pub async fn run_health_check(
     Ok(Json(status))
 }
 
+
+// === System Stats ===
+
+#[derive(Debug, serde::Serialize)]
+pub struct SystemStats {
+    pub total_memory_mb: u64,
+    pub used_memory_mb: u64,
+    pub available_memory_mb: u64,
+    pub total_cpu_cores: f32,
+    pub cpu_usage_percent: f32,
+    pub agent_count: usize,
+    pub running_agents: usize,
+    pub agent_memory_mb: u64,
+}
+
+pub async fn get_system_stats(
+    State(state): State<Arc<AppState>>,
+) -> Json<SystemStats> {
+    let containers = state.containers.read().await;
+    
+    let running: Vec<_> = containers.iter().filter(|a| a.status == AgentStatus::Running).collect();
+    let agent_memory: u64 = running.iter().map(|a| a.config.memory_mb as u64).sum();
+    
+    // Get actual system memory from /proc/meminfo
+    let (total_mem, available_mem) = get_system_memory();
+    let used_mem = total_mem.saturating_sub(available_mem);
+    
+    // Get CPU cores
+    let cpu_cores = num_cpus::get() as f32;
+    
+    // Get CPU usage (simplified - just count running containers)
+    let cpu_usage = (running.len() as f32 / cpu_cores.max(1.0)) * 100.0;
+    
+    Json(SystemStats {
+        total_memory_mb: total_mem / 1024,
+        used_memory_mb: used_mem / 1024,
+        available_memory_mb: available_mem / 1024,
+        total_cpu_cores: cpu_cores,
+        cpu_usage_percent: cpu_usage.min(100.0),
+        agent_count: containers.len(),
+        running_agents: running.len(),
+        agent_memory_mb: agent_memory,
+    })
+}
+
+fn get_system_memory() -> (u64, u64) {
+    use std::fs;
+    
+    if let Ok(content) = fs::read_to_string("/proc/meminfo") {
+        let mut total = 0u64;
+        let mut available = 0u64;
+        
+        for line in content.lines() {
+            if line.starts_with("MemTotal:") {
+                total = line.split(':')
+                    .nth(1)
+                    .and_then(|s| s.trim().split_whitespace().next())
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .unwrap_or(0);
+            } else if line.starts_with("MemAvailable:") {
+                available = line.split(':')
+                    .nth(1)
+                    .and_then(|s| s.trim().split_whitespace().next())
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .unwrap_or(0);
+            }
+        }
+        
+        (total, available)
+    } else {
+        (8192 * 1024, 4096 * 1024) // Fallback: 8GB total, 4GB available
+    }
+}
+
 // === Templates ===
 
 pub async fn list_templates(
@@ -582,6 +689,66 @@ pub async fn delete_secret(
     Ok(StatusCode::NO_CONTENT)
 }
 
+
+// === API Keys ===
+
+#[derive(Debug, serde::Deserialize)]
+pub struct SetApiKeyRequest {
+    pub provider: String,
+    pub key: String,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct ApiKeyInfo {
+    pub provider: String,
+    pub has_key: bool,
+}
+
+pub async fn list_api_keys(
+    State(state): State<Arc<AppState>>,
+) -> Json<Vec<ApiKeyInfo>> {
+    let keys = state.api_keys.read().await;
+    let providers = vec!["zai", "anthropic", "openai", "kimi", "google", "kimi-code", "access", "huggingface"];
+    
+    Json(providers.iter().map(|p| ApiKeyInfo {
+        provider: p.to_string(),
+        has_key: keys.contains_key(*p),
+    }).collect())
+}
+
+pub async fn set_api_key(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<SetApiKeyRequest>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let mut keys = state.api_keys.write().await;
+    keys.insert(req.provider.clone(), req.key);
+    
+    // Persist to disk
+    let keys_path = state.data_dir.join("api_keys.json");
+    if let Ok(json) = serde_json::to_string_pretty(&*keys) {
+        let _ = std::fs::write(&keys_path, json);
+    }
+    
+    Ok(StatusCode::CREATED)
+}
+
+pub async fn delete_api_key(
+    State(state): State<Arc<AppState>>,
+    Path(provider): Path<String>,
+) -> Result<StatusCode, (StatusCode, String)> {
+    let mut keys = state.api_keys.write().await;
+    keys.remove(&provider);
+    
+    // Persist to disk
+    let keys_path = state.data_dir.join("api_keys.json");
+    if let Ok(json) = serde_json::to_string_pretty(&*keys) {
+        let _ = std::fs::write(&keys_path, json);
+    }
+    
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// === Snapshots ===
 // === Snapshots ===
 
 pub async fn list_snapshots(

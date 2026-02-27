@@ -283,9 +283,19 @@ impl DockerClient {
                     env.push(format!("KIMI_API_KEY={}", key));
                 }
             }
+            LlmProvider::KimiCode => {
+                if let Some(key) = config.env_vars.get("KIMI_CODE_API_KEY") {
+                    env.push(format!("KIMI_CODE_API_KEY={}", key));
+                }
+            }
             LlmProvider::Zai => {
                 if let Some(key) = config.env_vars.get("ZAI_API_KEY") {
                     env.push(format!("ZAI_API_KEY={}", key));
+                }
+            }
+            LlmProvider::Access => {
+                if let Some(key) = config.env_vars.get("ACCESS_API_KEY") {
+                    env.push(format!("ACCESS_API_KEY={}", key));
                 }
             }
             LlmProvider::Huggingface => {
@@ -299,6 +309,11 @@ impl DockerClient {
                 }
             }
             _ => {}
+        }
+        // Pass provider and model to container
+        env.push(format!("LLM_PROVIDER={:?}", config.llm_provider));
+        if let Some(ref model) = config.llm_model {
+            env.push(format!("LLM_MODEL={}", model));
         }
 
         // Pass all custom env vars
@@ -354,6 +369,8 @@ impl DockerClient {
             LlmProvider::Zai => "openclaw-agent:latest",
             LlmProvider::Huggingface => "openclaw-agent:latest",
             LlmProvider::Ollama => "openclaw-agent:latest",
+            LlmProvider::KimiCode => "openclaw-agent:latest",
+            LlmProvider::Access => "openclaw-agent:latest",
             LlmProvider::LlamaCpp => "openclaw-agent:latest",
             LlmProvider::Vllm => "openclaw-agent:latest",
             LlmProvider::Lmstudio => "openclaw-agent:latest",
@@ -450,6 +467,7 @@ impl ContainerRuntime for DockerClient {
             host_config: Some(bollard::models::HostConfig {
                 memory: Some((config.memory_mb * 1024 * 1024) as i64),
                 nano_cpus: Some((config.cpu_cores * 1_000_000_000.0) as i64),
+                network_mode: Some("host".to_string()),
                 ..Default::default()
             }),
             ..Default::default()

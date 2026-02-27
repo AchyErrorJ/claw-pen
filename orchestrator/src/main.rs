@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 mod andor;
 mod api;
 mod config;
@@ -33,6 +34,21 @@ pub struct AppState {
     pub secrets: SecretsManager,
     pub snapshots: SnapshotManager,
     pub teams: teams::TeamRegistry,
+    pub api_keys: RwLock<HashMap<String, String>>,
+    pub data_dir: std::path::PathBuf,
+}
+
+
+fn load_api_keys(data_dir: &std::path::Path) -> HashMap<String, String> {
+    let keys_path = data_dir.join("api_keys.json");
+    if keys_path.exists() {
+        if let Ok(contents) = std::fs::read_to_string(&keys_path) {
+            if let Ok(keys) = serde_json::from_str(&contents) {
+                return keys;
+            }
+        }
+    }
+    HashMap::new()
 }
 
 #[tokio::main]
@@ -42,6 +58,8 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let config = config::load()?;
+    let data_dir = std::path::PathBuf::from("/data/claw-pen/data");
+    std::fs::create_dir_all(&data_dir).ok();
     tracing::info!("Loaded config: {:?}", config);
 
     // Load templates
@@ -125,6 +143,8 @@ async fn main() -> anyhow::Result<()> {
         secrets,
         snapshots,
         teams,
+        api_keys: RwLock::new(load_api_keys(&data_dir)),
+        data_dir,
     });
 
     let app = Router::new()
@@ -155,8 +175,12 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/agents/stop-all", post(api::stop_all))
         // Global metrics
         .route("/api/metrics", get(api::get_all_metrics))
+        .route("/api/system/stats", get(api::get_system_stats))
         // Templates
         .route("/api/templates", get(api::list_templates))
+        // API Keys
+        .route("/api/keys", get(api::list_api_keys).post(api::set_api_key))
+        .route("/api/keys/:provider", delete(api::delete_api_key))
         // Projects
         .route("/api/projects", get(api::list_projects).post(api::create_project))
         // Teams
@@ -168,6 +192,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/agents/import", post(api::import_agent))
         // Runtime status
         .route("/api/runtime/status", get(api::runtime_status))
+        .layer(CorsLayer::permissive())
         .with_state(state);
 
     let addr = format!("{}:{}", "0.0.0.0", 3000);

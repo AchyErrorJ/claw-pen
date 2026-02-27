@@ -306,6 +306,8 @@ impl ContainmentClient {
             LlmProvider::Gemini => "gemini",
             LlmProvider::Kimi => "kimi",
             LlmProvider::Zai => "zai",
+            LlmProvider::KimiCode => "kimi-code",
+            LlmProvider::Access => "access",
             LlmProvider::Huggingface => "huggingface",
             LlmProvider::Ollama => "ollama",
             LlmProvider::LlamaCpp => "llamacpp",

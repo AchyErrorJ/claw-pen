@@ -1,587 +1,338 @@
-// Prevents additional console window on Windows in release builds
+// Claw Pen Desktop - Tauri App with Rust WebSockets
+// With Ed25519 device identity
+
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use aes_gcm::AeadCore;
-use aes_gcm::AeadInPlace;
-use aes_gcm::Aes256Gcm;
-use aes_gcm::KeyInit;
-use aes_gcm::Nonce as AesNonce;
 use anyhow::Result;
-use base64::Engine;
-use rand::RngCore;
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use ed25519_dalek::Signer;
+use ed25519_dalek::SigningKey;
+use futures_util::{SinkExt, StreamExt};
+use http::request::Request;
+use rand::rngs::OsRng;
+use rand::Rng;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use tauri::{AppHandle, Emitter, State};
+use tokio::sync::mpsc::{channel, Sender};
+use tokio_tungstenite::connect_async_with_config;
+use tungstenite::handshake::client::generate_key;
 
-// ============================================================================
-// Data Types
-// ============================================================================
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AgentContainer {
-    pub id: String,
-    pub name: String,
-    pub status: String,
-    pub config: AgentConfig,
-    pub tailscale_ip: Option<String>,
-}
+static REQUEST_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AgentConfig {
-    pub llm_provider: String,
-    pub llm_model: Option<String>,
-    pub memory_mb: u32,
-    pub cpu_cores: f32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CreateAgentRequest {
-    pub name: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub template: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub config: Option<PartialAgentConfig>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PartialAgentConfig {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub llm_provider: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub llm_model: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub memory_mb: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub cpu_cores: Option<f32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub env_vars: Option<HashMap<String, String>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CreateAgentParams {
-    pub name: String,
-    pub template: Option<String>,
-    pub provider: String,
-    pub model: String,
-    pub memory_mb: u32,
-    pub cpu_cores: f32,
-    pub env_vars: HashMap<String, String>,
-    pub api_key: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Template {
-    pub id: String,
-    pub name: String,
-    pub description: String,
-    pub defaults: TemplateDefaults,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TemplateDefaults {
-    pub llm_provider: String,
-    pub llm_model: String,
-    pub memory_mb: u32,
-    pub cpu_cores: f32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
 pub struct AppConfig {
     pub orchestrator_url: String,
-    pub has_completed_setup: bool,
-    pub deployment_mode: String,
+    pub agent_gateway_url: String,
 }
 
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
             orchestrator_url: "http://localhost:3000".to_string(),
-            has_completed_setup: false,
-            deployment_mode: "windows-wsl".to_string(),
+            agent_gateway_url: "ws://127.0.0.1:18790/ws".to_string(),
         }
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct StoredApiKey {
-    pub provider: String,
-    pub encrypted_key: String,
-    pub created_at: String,
+pub struct AppState {
+    pub ws_sender: Arc<tokio::sync::Mutex<Option<Sender<String>>>>,
 }
 
-// ============================================================================
-// Encryption
-// ============================================================================
-
-pub struct KeyManager {
-    #[allow(dead_code)]
-    key_path: PathBuf,
-    master_key: Option<Vec<u8>>,
+fn get_device_keys_path() -> PathBuf {
+    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    home.join(".openclaw").join("claw-pen-device.json")
 }
 
-impl KeyManager {
-    fn new() -> Result<Self> {
-        let config_dir = dirs::config_dir()
-            .ok_or_else(|| anyhow::anyhow!("No config directory"))?
-            .join("claw-pen");
-        fs::create_dir_all(&config_dir)?;
-        let key_path = config_dir.join("master.key");
-
-        let master_key = if key_path.exists() {
-            // Load existing key
-            fs::read(&key_path)?
-        } else {
-            // Generate new key - 32 bytes for AES-256
-            let mut key_bytes = [0u8; 32];
-            rand::rngs::OsRng.fill_bytes(&mut key_bytes);
-            fs::write(&key_path, key_bytes)?;
-            key_bytes.to_vec()
-        };
-
-        Ok(Self {
-            key_path,
-            master_key: Some(master_key),
-        })
-    }
-
-    fn encrypt(&self, plaintext: &str) -> Result<String> {
-        let key_bytes = &self.master_key.as_ref().unwrap()[..32];
-        let cipher = Aes256Gcm::new(key_bytes.into());
-        let nonce = Aes256Gcm::generate_nonce(&mut rand::rngs::OsRng);
-
-        let mut buffer = plaintext.as_bytes().to_vec();
-        cipher
-            .encrypt_in_place(&nonce, b"", &mut buffer)
-            .map_err(|e| anyhow::anyhow!("Encryption failed: {}", e))?;
-
-        // Combine nonce + ciphertext and encode as base64
-        let mut combined = nonce.to_vec();
-        combined.extend_from_slice(&buffer);
-        Ok(base64::engine::general_purpose::STANDARD.encode(combined))
-    }
-
-    fn decrypt(&self, encrypted: &str) -> Result<String> {
-        let key_bytes = &self.master_key.as_ref().unwrap()[..32];
-        let cipher = Aes256Gcm::new(key_bytes.into());
-
-        let combined = base64::engine::general_purpose::STANDARD.decode(encrypted)?;
-        if combined.len() < 12 {
-            return Err(anyhow::anyhow!("Invalid encrypted data"));
-        }
-
-        let (nonce_bytes, ciphertext) = combined.split_at(12);
-        let nonce = AesNonce::from_slice(nonce_bytes);
-
-        let mut buffer = ciphertext.to_vec();
-        cipher
-            .decrypt_in_place(nonce, b"", &mut buffer)
-            .map_err(|e| anyhow::anyhow!("Decryption failed: {}", e))?;
-
-        String::from_utf8(buffer).map_err(|e| anyhow::anyhow!("Invalid UTF-8: {}", e))
-    }
-
-    fn store_agent_key(&self, agent_id: &str, provider: &str, api_key: &str) -> Result<()> {
-        let config_dir = dirs::config_dir()
-            .ok_or_else(|| anyhow::anyhow!("No config directory"))?
-            .join("claw-pen")
-            .join("keys");
-        fs::create_dir_all(&config_dir)?;
-
-        let key_file = config_dir.join(format!("{}.json", agent_id));
-        let stored = StoredApiKey {
-            provider: provider.to_string(),
-            encrypted_key: self.encrypt(api_key)?,
-            created_at: chrono_utc::now().to_rfc3339(),
-        };
-        fs::write(key_file, serde_json::to_string_pretty(&stored)?)?;
-        Ok(())
-    }
-
-    fn get_agent_key(&self, agent_id: &str) -> Result<String> {
-        let config_dir = dirs::config_dir()
-            .ok_or_else(|| anyhow::anyhow!("No config directory"))?
-            .join("claw-pen")
-            .join("keys");
-        let key_file = config_dir.join(format!("{}.json", agent_id));
-
-        if !key_file.exists() {
-            return Err(anyhow::anyhow!("No API key found for agent"));
-        }
-
-        let content = fs::read_to_string(key_file)?;
-        let stored: StoredApiKey = serde_json::from_str(&content)?;
-        self.decrypt(&stored.encrypted_key)
-    }
-
-    fn delete_agent_key(&self, agent_id: &str) -> Result<()> {
-        let config_dir = dirs::config_dir()
-            .ok_or_else(|| anyhow::anyhow!("No config directory"))?
-            .join("claw-pen")
-            .join("keys");
-        let key_file = config_dir.join(format!("{}.json", agent_id));
-
-        if key_file.exists() {
-            fs::remove_file(key_file)?;
-        }
-        Ok(())
-    }
+struct DeviceKeys {
+    signing_key: SigningKey,
+    device_id: String,
 }
 
-// Simple chrono replacement for timestamps
-mod chrono_utc {
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    pub fn now() -> DateTime {
-        DateTime(())
+fn load_or_create_device_keys() -> Result<DeviceKeys> {
+    let path = get_device_keys_path();
+    
+    if path.exists() {
+        let data = fs::read_to_string(&path)?;
+        let keys: serde_json::Value = serde_json::from_str(&data)?;
+        
+        let private_key_b64 = keys["privateKey"].as_str().ok_or_else(|| anyhow::anyhow!("Missing privateKey"))?;
+        let private_key_bytes = BASE64.decode(private_key_b64)?;
+        let bytes: [u8; 32] = private_key_bytes.try_into().map_err(|_| anyhow::anyhow!("Invalid key length"))?;
+        let signing_key = SigningKey::from_bytes(&bytes);
+        
+        let device_id = keys["deviceId"].as_str().unwrap_or("unknown").to_string();
+        
+        return Ok(DeviceKeys { signing_key, device_id });
     }
-
-    pub struct DateTime(());
-
-    impl DateTime {
-        pub fn to_rfc3339(&self) -> String {
-            let duration = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap()
-                .as_secs();
-            format!("{}", duration)
-        }
-    }
-}
-
-// ============================================================================
-// Configuration Management
-// ============================================================================
-
-fn get_config_path() -> PathBuf {
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("claw-pen")
-        .join("config.json")
-}
-
-fn load_config() -> Result<AppConfig> {
-    let config_path = get_config_path();
-    if config_path.exists() {
-        let content = fs::read_to_string(config_path)?;
-        Ok(serde_json::from_str(&content)?)
-    } else {
-        Ok(AppConfig::default())
-    }
-}
-
-fn save_config(config: &AppConfig) -> Result<()> {
-    let config_path = get_config_path();
-    if let Some(parent) = config_path.parent() {
+    
+    let mut rng = OsRng;
+    let signing_key = SigningKey::generate(&mut rng);
+    let verifying_key = signing_key.verifying_key();
+    
+    let mut hasher = Sha256::new();
+    hasher.update(verifying_key.to_bytes());
+    let device_id = hex::encode(hasher.finalize());
+    
+    let keys_json = serde_json::json!({
+        "privateKey": BASE64.encode(signing_key.to_bytes()),
+        "publicKey": BASE64.encode(verifying_key.to_bytes()),
+        "deviceId": device_id
+    });
+    
+    if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    fs::write(config_path, serde_json::to_string_pretty(config)?)?;
-    Ok(())
+    fs::write(&path, serde_json::to_string_pretty(&keys_json)?)?;
+    
+    Ok(DeviceKeys { signing_key, device_id })
 }
-
-// ============================================================================
-// API Client
-// ============================================================================
-
-struct ApiClient {
-    base_url: String,
-    client: reqwest::Client,
-}
-
-impl ApiClient {
-    fn new(base_url: String) -> Self {
-        Self {
-            base_url,
-            client: reqwest::Client::new(),
-        }
-    }
-
-    async fn get<T>(&self, path: &str) -> Result<T>
-    where
-        T: serde::de::DeserializeOwned,
-    {
-        let response = self
-            .client
-            .get(format!("{}{}", self.base_url, path))
-            .send()
-            .await?;
-
-        if response.status().is_success() {
-            Ok(response.json().await?)
-        } else {
-            Err(anyhow::anyhow!("API error: {}", response.status()))
-        }
-    }
-
-    async fn post<T, B>(&self, path: &str, body: &B) -> Result<T>
-    where
-        T: serde::de::DeserializeOwned,
-        B: serde::Serialize,
-    {
-        let response = self
-            .client
-            .post(format!("{}{}", self.base_url, path))
-            .json(body)
-            .send()
-            .await?;
-
-        let status = response.status();
-        if status.is_success() {
-            Ok(response.json().await?)
-        } else {
-            let text = response.text().await.unwrap_or_default();
-            Err(anyhow::anyhow!("API error {}: {}", status, text))
-        }
-    }
-
-    async fn delete(&self, path: &str) -> Result<()> {
-        let response = self
-            .client
-            .delete(format!("{}{}", self.base_url, path))
-            .send()
-            .await?;
-
-        if response.status().is_success() {
-            Ok(())
-        } else {
-            Err(anyhow::anyhow!("API error: {}", response.status()))
-        }
-    }
-}
-
-// ============================================================================
-// Tauri Commands
-// ============================================================================
 
 #[tauri::command]
 async fn get_config() -> Result<AppConfig, String> {
-    load_config().map_err(|e| e.to_string())
+    Ok(AppConfig::default())
+}
+
+fn build_connect_request(req_id: &str, nonce: &str, device_keys: &DeviceKeys) -> String {
+    let signed_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    
+    let scopes = "operator.admin,operator.approvals,operator.pairing";
+    
+    let message = format!(
+        "v2|{}|openclaw-control-ui|webchat|operator|{}|{}||{}",
+        device_keys.device_id,
+        scopes,
+        signed_at,
+        nonce
+    );
+    
+    eprintln!("[Device] Signing message: {}", &message);
+    
+    let signature = device_keys.signing_key.sign(message.as_bytes());
+    let signature_b64 = BASE64.encode(signature.to_bytes());
+    let public_key_b64 = BASE64.encode(device_keys.signing_key.verifying_key().to_bytes());
+    
+    serde_json::json!({
+        "type": "req",
+        "id": req_id,
+        "method": "connect",
+        "params": {
+            "minProtocol": 3,
+            "maxProtocol": 3,
+            "client": {
+                "id": "openclaw-control-ui",
+                "version": "1.0.0",
+                "platform": "desktop",
+                "mode": "webchat"
+            },
+            "role": "operator",
+            "scopes": ["operator.admin", "operator.approvals", "operator.pairing"],
+            "device": {
+                "id": device_keys.device_id,
+                "publicKey": public_key_b64,
+                "signature": signature_b64,
+                "signedAt": signed_at,
+                "nonce": nonce
+            },
+            "caps": [],
+            "commands": []
+        }
+    }).to_string()
 }
 
 #[tauri::command]
-async fn save_app_config(
-    orchestrator_url: String,
-    has_completed_setup: bool,
-    deployment_mode: String,
+async fn connect_websocket(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    url: String,
 ) -> Result<(), String> {
-    let config = AppConfig {
-        orchestrator_url,
-        has_completed_setup,
-        deployment_mode,
-    };
-    save_config(&config).map_err(|e| e.to_string())
+    let app_handle = app.clone();
+    
+    let device_keys = load_or_create_device_keys().map_err(|e| format!("Failed to load device keys: {}", e))?;
+    eprintln!("[Device] ID: {}", device_keys.device_id);
+    
+    let (tx, mut rx) = channel::<String>(100);
+    *state.ws_sender.lock().await = Some(tx);
+    
+    eprintln!("[WS] Connecting to: {}", url);
+    
+    let signing_key_bytes = device_keys.signing_key.to_bytes();
+    let device_id = device_keys.device_id.clone();
+
+    tokio::spawn(async move {
+        loop {
+            eprintln!("[WS] Attempting connection to {}", url);
+            
+            let request = Request::builder()
+                .uri(&url)
+                .header("Host", "127.0.0.1:18790")
+                .header("Connection", "Upgrade")
+                .header("Upgrade", "websocket")
+                .header("Sec-WebSocket-Version", "13")
+                .header("Sec-WebSocket-Key", generate_key())
+                .header("Origin", "http://127.0.0.1:18790")
+                .body(())
+                .unwrap();
+            
+            match connect_async_with_config(request, None, false).await {
+                Ok((ws_stream, _)) => {
+                    eprintln!("[WS] Connected successfully");
+                    let _ = app_handle.emit("ws-connected", true);
+                    
+                    let (mut write, mut read) = ws_stream.split();
+                    let mut authenticated = false;
+                    let mut connect_sent = false;
+                    
+                    let signing_key = SigningKey::from_bytes(&signing_key_bytes);
+                    let dk = DeviceKeys { signing_key, device_id: device_id.clone() };
+                    
+                    loop {
+                        tokio::select! {
+                            msg = read.next() => {
+                                match msg {
+                                    Some(Ok(m)) => {
+                                        if m.is_text() {
+                                            let text = m.to_string();
+                                            
+                                            if !connect_sent && text.contains("\"event\":\"connect.challenge\"") {
+                                                let nonce = extract_nonce(&text).unwrap_or("");
+                                                eprintln!("[WS] Got challenge, nonce: {}", nonce);
+                                                
+                                                let id = REQUEST_ID_COUNTER.fetch_add(1, Ordering::SeqCst);
+                                                let response = build_connect_request(
+                                                    &format!("cp-{}", id),
+                                                    nonce,
+                                                    &dk
+                                                );
+                                                eprintln!("[WS] Sending connect");
+                                                if let Err(e) = write.send(tungstenite::Message::Text(response)).await {
+                                                    eprintln!("[WS] Send error: {}", e);
+                                                    break;
+                                                }
+                                                connect_sent = true;
+                                            } else if text.contains("\"ok\":true") && text.contains("\"id\":\"cp-") {
+                                                eprintln!("[WS] Authenticated!");
+                                                authenticated = true;
+                                                let _ = app_handle.emit("ws-authenticated", true);
+                                            } else if text.contains("\"error\"") {
+                                                eprintln!("[WS] Error: {}", &text[..text.len().min(200)]);
+                                                let _ = app_handle.emit("ws-error", &text);
+                                            } else if authenticated {
+                                                eprintln!("[WS] Event: {}", &text[..text.len().min(100)]);
+                                                let _ = app_handle.emit("ws-message", &text);
+                                            }
+                                        } else if m.is_close() {
+                                            eprintln!("[WS] Server closed");
+                                            break;
+                                        }
+                                    }
+                                    Some(Err(e)) => {
+                                        eprintln!("[WS] Read error: {}", e);
+                                        break;
+                                    }
+                                    None => break,
+                                }
+                            }
+                            msg = rx.recv() => {
+                                if let Some(text) = msg {
+                                    if authenticated {
+                                        eprintln!("[WS] TX: {}", &text);
+                                        if let Err(e) = write.send(tungstenite::Message::Text(text)).await {
+                                            eprintln!("[WS] Send error: {}", e);
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    let _ = app_handle.emit("ws-connected", false);
+                }
+                Err(e) => {
+                    eprintln!("[WS] Connection failed: {}", e);
+                    let _ = app_handle.emit("ws-connected", false);
+                }
+            }
+            
+            eprintln!("[WS] Reconnecting in 3s...");
+            tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+        }
+    });
+
+    Ok(())
 }
 
-#[tauri::command]
-async fn health_check() -> Result<String, String> {
-    let config = load_config().map_err(|e| e.to_string())?;
-    let client = reqwest::Client::new();
-    let response = client
-        .get(format!("{}/health", config.orchestrator_url))
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-
-    if response.status().is_success() {
-        Ok("Orchestrator is running".to_string())
-    } else {
-        Err("Orchestrator not responding".to_string())
-    }
-}
-
-#[tauri::command]
-async fn list_agents() -> Result<Vec<AgentContainer>, String> {
-    let config = load_config().map_err(|e| e.to_string())?;
-    let client = ApiClient::new(config.orchestrator_url);
-    client.get("/api/agents").await.map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-async fn get_agent(id: String) -> Result<AgentContainer, String> {
-    let config = load_config().map_err(|e| e.to_string())?;
-    let client = ApiClient::new(config.orchestrator_url);
-    client
-        .get(&format!("/api/agents/{}", id))
-        .await
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-async fn create_agent(params: CreateAgentParams) -> Result<AgentContainer, String> {
-    let name = params.name;
-    let template = params.template;
-    let provider = params.provider;
-    let model = params.model;
-    let memory_mb = params.memory_mb;
-    let cpu_cores = params.cpu_cores;
-    let mut env_vars = params.env_vars;
-    let api_key = params.api_key;
-    let config = load_config().map_err(|e| e.to_string())?;
-    let client = ApiClient::new(config.orchestrator_url);
-
-    // Store API key if provided
-    let agent_id = format!("agent_{}", name.to_lowercase().replace(' ', "_"));
-
-    if let Some(key) = api_key {
-        if !key.is_empty() {
-            let key_manager = KeyManager::new().map_err(|e| e.to_string())?;
-            key_manager
-                .store_agent_key(&agent_id, &provider, &key)
-                .map_err(|e| e.to_string())?;
-
-            // Add API key to env vars
-            match provider.to_lowercase().as_str() {
-                "openai" => env_vars.insert("OPENAI_API_KEY".to_string(), key),
-                "anthropic" => env_vars.insert("ANTHROPIC_API_KEY".to_string(), key),
-                "gemini" => env_vars.insert("GEMINI_API_KEY".to_string(), key),
-                "kimi" => env_vars.insert("KIMI_API_KEY".to_string(), key),
-                "zai" => env_vars.insert("ZAI_API_KEY".to_string(), key),
-                "huggingface" => env_vars.insert("HF_TOKEN".to_string(), key),
-                _ => env_vars.insert("API_KEY".to_string(), key),
-            };
+fn extract_nonce(json: &str) -> Option<&str> {
+    if let Some(start) = json.find("\"nonce\":\"") {
+        let start = start + 9;
+        if let Some(end) = json[start..].find("\"") {
+            return Some(&json[start..start+end]);
         }
     }
+    None
+}
 
-    let req = CreateAgentRequest {
-        name,
-        template,
-        config: Some(PartialAgentConfig {
-            llm_provider: Some(provider),
-            llm_model: if model.is_empty() { None } else { Some(model) },
-            memory_mb: Some(memory_mb),
-            cpu_cores: Some(cpu_cores),
-            env_vars: if env_vars.is_empty() {
-                None
-            } else {
-                Some(env_vars)
-            },
-        }),
-    };
-
-    client
-        .post("/api/agents", &req)
-        .await
-        .map_err(|e| e.to_string())
+fn uuid() -> String {
+    let mut rng = rand::thread_rng();
+    format!("{:08x}-{:04x}-{:04x}-{:04x}-{:012x}",
+        rng.gen::<u32>(),
+        rng.gen::<u16>(),
+        rng.gen::<u16>(),
+        rng.gen::<u16>(),
+        rng.gen::<u64>() & 0xffffffffffff
+    )
 }
 
 #[tauri::command]
-async fn delete_agent(id: String) -> Result<(), String> {
-    let config = load_config().map_err(|e| e.to_string())?;
-    let client = ApiClient::new(config.orchestrator_url);
-
-    // Delete stored API key
-    let key_manager = KeyManager::new().map_err(|e| e.to_string())?;
-    let _ = key_manager.delete_agent_key(&id);
-
-    client
-        .delete(&format!("/api/agents/{}", id))
-        .await
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-async fn start_agent(id: String) -> Result<AgentContainer, String> {
-    let config = load_config().map_err(|e| e.to_string())?;
-    let client = ApiClient::new(config.orchestrator_url);
-
-    // Retrieve and inject API key
-    let key_manager = KeyManager::new().map_err(|e| e.to_string())?;
-    if key_manager.get_agent_key(&id).is_ok() {
-        // We need to update the agent with the API key before starting
-        // This would require an update endpoint - for now, we'll pass it via env
-        // TODO: Implement proper secret injection via Docker secrets
-    }
-
-    client
-        .post(&format!("/api/agents/{}/start", id), &())
-        .await
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-async fn stop_agent(id: String) -> Result<AgentContainer, String> {
-    let config = load_config().map_err(|e| e.to_string())?;
-    let client = ApiClient::new(config.orchestrator_url);
-    client
-        .post(&format!("/api/agents/{}/stop", id), &())
-        .await
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-async fn list_templates() -> Result<Vec<Template>, String> {
-    let config = load_config().map_err(|e| e.to_string())?;
-    let client = ApiClient::new(config.orchestrator_url);
-    client
-        .get("/api/templates")
-        .await
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-async fn check_docker() -> Result<bool, String> {
-    let config = load_config().map_err(|e| e.to_string())?;
-    let client = reqwest::Client::new();
-    let response = client
-        .get(format!("{}/api/runtime/status", config.orchestrator_url))
-        .send()
-        .await
-        .map_err(|e| e.to_string());
-
-    match response {
-        Ok(resp) => Ok(resp.status().is_success()),
-        Err(_) => Ok(false),
+async fn send_chat_message(
+    state: State<'_, AppState>,
+    text: String,
+) -> Result<(), String> {
+    let sender = state.ws_sender.lock().await;
+    
+    if let Some(tx) = sender.as_ref() {
+        let id = REQUEST_ID_COUNTER.fetch_add(1, Ordering::SeqCst);
+        let idempotency_key = uuid();
+        let msg = serde_json::json!({
+            "type": "req",
+            "id": format!("msg-{}", id),
+            "method": "chat.send",
+            "params": {
+                "sessionKey": "main",
+                "message": text,
+                "deliver": false,
+                "idempotencyKey": idempotency_key
+            }
+        }).to_string();
+        
+        tx.send(msg).await.map_err(|e: tokio::sync::mpsc::error::SendError<String>| e.to_string())?;
+        Ok(())
+    } else {
+        Err("WebSocket not connected".to_string())
     }
 }
-
-#[tauri::command]
-async fn get_stored_api_key(agent_id: String) -> Result<Option<String>, String> {
-    let key_manager = KeyManager::new().map_err(|e| e.to_string())?;
-    match key_manager.get_agent_key(&agent_id) {
-        Ok(key) => Ok(Some(key)),
-        Err(_) => Ok(None),
-    }
-}
-
-#[tauri::command]
-async fn test_orchestrator_connection(url: String) -> Result<bool, String> {
-    let client = reqwest::Client::new();
-    let response = client
-        .get(format!("{}/health", url))
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
-    Ok(response.status().is_success())
-}
-
-// ============================================================================
-// Main
-// ============================================================================
 
 fn main() {
+    let state = AppState {
+        ws_sender: Arc::new(tokio::sync::Mutex::new(None)),
+    };
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_http::init())
+        .manage(state)
         .invoke_handler(tauri::generate_handler![
-            // Config
             get_config,
-            save_app_config,
-            // Health
-            health_check,
-            check_docker,
-            test_orchestrator_connection,
-            // Agents
-            list_agents,
-            get_agent,
-            create_agent,
-            delete_agent,
-            start_agent,
-            stop_agent,
-            // Templates
-            list_templates,
-            // API Keys
-            get_stored_api_key,
+            connect_websocket,
+            send_chat_message,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
