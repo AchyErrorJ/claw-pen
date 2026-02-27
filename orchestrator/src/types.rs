@@ -364,15 +364,15 @@ pub struct RouterConfig {
     pub clarify_on_low_confidence: bool,
 }
 
-fn default_router_mode() -> RouterMode {
+pub fn default_router_mode() -> RouterMode {
     RouterMode::Hybrid
 }
 
-fn default_confidence_threshold() -> f32 {
+pub fn default_confidence_threshold() -> f32 {
     0.7
 }
 
-fn default_true() -> bool {
+pub fn default_true() -> bool {
     true
 }
 
