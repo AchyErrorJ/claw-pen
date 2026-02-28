@@ -11,3 +11,5 @@ agents/*/memory/
 agents/*/notifications/
 *.log
 *.json.bak
+images/openclaw-agent/openclaw-bundle.tar.gz
+data/
